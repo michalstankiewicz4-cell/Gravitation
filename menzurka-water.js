@@ -49,6 +49,7 @@
     heights.fill(REST_ROWS);
     velocity.fill(0);
     splashes.length = 0;
+    foam.length = 0;
   }
 
   const SPREAD = 0.16;      // jak szybko fala rozchodzi się do sąsiadów
@@ -58,6 +59,8 @@
   const BOUNCE_COEFF = 0.5; // jak mocno pionowy wstrząs podbija całą powierzchnię
   const FORCE_MAX = 3;      // ogranicznik siły pozornej na klatkę (chroni przed skokami dt/teleportacji myszki)
   const MAX_V = 6;
+  const MAX_SLOPE = 3;      // graniczna różnica wysokości (wiersze) między sąsiadami
+  const AVALANCHE_RATE = 0.6; // jaka część nadwyżki nachylenia "osuwa się" w jednej klatce
 
   let frame = 0;
 
@@ -83,6 +86,31 @@
     for (let c = 0; c < COLS; c++) {
       heights[c] += velocity[c] * dt;
     }
+
+    // Liniowe równanie fali (powyżej) daje tylko gładkie, sinusoidalne kształty.
+    // Żeby fala mogła się "łamać" na boki, ograniczamy maksymalne nachylenie
+    // powierzchni: nadwyżka gwałtownie osuwa się do sąsiedniej kolumny (jak w
+    // modelu usypującego się piasku) zamiast płynnie propagować, co daje ostrzejszy,
+    // mniej regularny kształt i pryska pianą w miejscu załamania.
+    for (let c = 0; c < COLS - 1; c++) {
+      const diff = heights[c] - heights[c + 1];
+      if (diff > MAX_SLOPE) {
+        const amt = (diff - MAX_SLOPE) * AVALANCHE_RATE * dt;
+        heights[c] -= amt;
+        heights[c + 1] += amt;
+        velocity[c + 1] += amt * 0.4;
+        velocity[c] -= amt * 0.15;
+        spawnFoam(c + 1, amt);
+      } else if (diff < -MAX_SLOPE) {
+        const amt = (-diff - MAX_SLOPE) * AVALANCHE_RATE * dt;
+        heights[c + 1] -= amt;
+        heights[c] += amt;
+        velocity[c] += amt * 0.4;
+        velocity[c + 1] -= amt * 0.15;
+        spawnFoam(c, amt);
+      }
+    }
+
     for (let c = 0; c < COLS; c++) {
       if (heights[c] > ROWS) {
         spill(c, heights[c] - ROWS, worldVX, worldVY);
@@ -92,6 +120,37 @@
         heights[c] = 0;
         if (velocity[c] < 0) velocity[c] = 0;
       }
+    }
+  }
+
+  // ---------- piana w miejscu załamania fali (w układzie naczynia) ----------
+  const foam = [];
+
+  function spawnFoam(col, amt) {
+    if (amt < 0.15) return;
+    const n = Math.min(3, Math.ceil(amt));
+    const fx = WALL + col * CS + CS / 2;
+    const fy = (ROWS - heights[col]) * CS;
+    for (let i = 0; i < n; i++) {
+      foam.push({
+        x: fx + (Math.random() - 0.5) * CS,
+        y: fy,
+        vx: (Math.random() - 0.5) * 1.5,
+        vy: -Math.random() * 1.2,
+        life: 0.35 + Math.random() * 0.25,
+      });
+    }
+    if (foam.length > 150) foam.splice(0, foam.length - 150);
+  }
+
+  function updateFoam(dt) {
+    for (let k = foam.length - 1; k >= 0; k--) {
+      const p = foam[k];
+      p.vy += 0.15 * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.life -= dt * 0.033;
+      if (p.life <= 0) foam.splice(k, 1);
     }
   }
 
@@ -241,6 +300,15 @@
     ctx.globalAlpha = 1;
   }
 
+  function drawFoam() {
+    ctx.fillStyle = '#e8f6ff';
+    for (const p of foam) {
+      ctx.globalAlpha = Math.max(0, Math.min(1, p.life * 2));
+      ctx.fillRect(container.x + p.x - 1, container.y + p.y - 1, 3, 3);
+    }
+    ctx.globalAlpha = 1;
+  }
+
   function render() {
     ctx.fillStyle = '#05060a';
     ctx.fillRect(0, 0, W, H);
@@ -256,6 +324,7 @@
     drawSplashes();
     drawGlass();
     drawWater();
+    drawFoam();
   }
 
   let lastT = performance.now();
@@ -268,6 +337,7 @@
     const { dvx, dvy, worldVX, worldVY } = updateContainer(dt);
     simulateWater(dt, dvx, dvy, worldVX, worldVY);
     updateSplashes(dt);
+    updateFoam(dt);
     render();
 
     requestAnimationFrame(animate);
