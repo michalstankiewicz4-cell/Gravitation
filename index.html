@@ -1682,6 +1682,7 @@
   colorModeButtons.forEach(b => b.addEventListener('click', () => {
     colorMode = b.dataset.colorMode;
     colorModeButtons.forEach(x => x.classList.toggle('active', x === b));
+    renderListBody(); // swatches in the selected-photons list are drawn once, not per frame
   }));
 
   // ---------- spawning (used by the "spawn" brush) ----------
