@@ -83,6 +83,8 @@
   #winList th { color: #8b93ad; font-weight: 500; border-bottom: 1px solid rgba(255,255,255,0.08); position: sticky; top: 0; background: rgba(14,17,27,0.98); }
   #winList tr.pick { cursor: pointer; }
   #winList tr.pick:hover { background: rgba(255,255,255,0.06); }
+  #winList tr.row-open { background: rgba(108,133,201,0.18); box-shadow: inset 3px 0 0 #6c85c9; }
+  #winList tr.row-open:hover { background: rgba(108,133,201,0.28); }
   #winList th.sortable { cursor: pointer; user-select: none; }
   #winList th.sortable:hover { color: #e8ecf5; }
   #winList .sort-arrow { display: inline-block; width: 10px; margin-left: 2px; font-size: 9px; color: #6c85c9; }

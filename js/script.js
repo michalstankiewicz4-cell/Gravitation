@@ -1040,10 +1040,8 @@
     removeDynamicDockIcon('info-' + id);
     delete windowState['winInfo-' + id];
     saveWindowState();
-    if (listSelection.delete(id)) {
-      if (listSelection.size === 0) minimizeWin(winList, null);
-      renderListBody();
-    }
+    // stays in the list — just drops the "open" highlight, doesn't remove the row
+    if (listSelection.has(id)) renderListBody();
   }
 
   function openInfoWindow(p) {
@@ -1142,7 +1140,7 @@
       .sort((a, b) => (getVal(a) - getVal(b)) * listSort.dir);
     for (const p of ps) {
       const tr = document.createElement('tr');
-      tr.className = 'pick';
+      tr.className = 'pick' + (openInfoWindows.has(p.id) ? ' row-open' : '');
       tr.innerHTML = `<td><span class="swatch" style="background:${photonColor(p,1)}"></span>${p.id}</td><td>${p.charge.toFixed(2)}</td><td>${p.maxSpeed.toFixed(0)} px/s</td><td>${p.energy.toFixed(2)}</td><td>${p.mass.toFixed(2)}</td><td>${p.force.toFixed(0)}</td><td>${p.forceRange.toFixed(0)}</td><td><button class="var-del row-del" title="Usuń foton z symulacji">✕</button></td>`;
       tr.addEventListener('click', () => selectPhoton(p.id));
       tr.querySelector('.row-del').addEventListener('click', (e) => {
