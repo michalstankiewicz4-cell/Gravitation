@@ -274,6 +274,7 @@
 
   // ---------- color filter: how photons are colored ----------
   let colorMode = 'default'; // 'default' (flat ±/0) | 'intensity' (charge, scaled to range in play) | 'speed'
+  let glowEnabled = false; // shadowBlur halo around photons, off by default (visual only, no physics effect)
   let maxAbsChargeSeen = 1;
   function updateChargeRange() {
     let m = 0;
@@ -497,7 +498,7 @@
     const tileMinX = Math.floor(camX / W), tileMaxX = Math.floor((camX + viewW - 0.01) / W);
     const tileMinY = Math.floor(camY / H), tileMaxY = Math.floor((camY + viewH - 0.01) / H);
 
-    const glow = photons.length <= 500 && zoom > 0.6; // skip glow when it'd cost too many draws
+    const glow = glowEnabled && photons.length <= 500 && zoom > 0.6; // skip glow when it'd cost too many draws
     ctx.shadowBlur = glow ? 12 : 0;
 
     if (colorMode === 'intensity') updateChargeRange();
@@ -1604,6 +1605,10 @@
     colorModeButtons.forEach(x => x.classList.toggle('active', x === b));
     renderListBody(); // swatches in the selected-photons list are drawn once, not per frame
   }));
+
+  const glowToggle = document.getElementById('glowToggle');
+  glowToggle.checked = glowEnabled;
+  glowToggle.addEventListener('change', () => { glowEnabled = glowToggle.checked; });
 
   // ---------- spawning (used by the "spawn" brush) ----------
   function spawnPhotonAt(x, y) {
