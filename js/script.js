@@ -1045,15 +1045,14 @@
   }
 
   function openInfoWindow(p) {
-    // also highlight it in the "Zaznaczone fotony" list (renders live if that
-    // window happens to be open; doesn't force it open otherwise)
-    if (!listSelection.has(p.id)) { listSelection.add(p.id); renderListBody(); }
+    listSelection.add(p.id); // no-op if already there; row highlight is refreshed below
 
     let w = openInfoWindows.get(p.id);
     if (w) {
       restoreWin(w.el, null);
       removeDynamicDockIcon('info-' + p.id);
       renderInfoPanel(p, w);
+      renderListBody(); // re-render after openInfoWindows reflects the final state
       return;
     }
     const n = openInfoWindows.size;
@@ -1082,6 +1081,7 @@
     });
     el.querySelector('.win-close').addEventListener('click', () => closeInfoWindow(p.id));
     renderInfoPanel(p, w);
+    renderListBody(); // re-render after openInfoWindows reflects the final state
   }
 
   function updateInfoPanelIfOpen() {
