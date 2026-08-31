@@ -790,6 +790,7 @@
     updateZoomIndicator();
     renderForcePreview();
     renderForceGraph();
+    updateReactors(dt * speedMultiplier);
     requestAnimationFrame(loop);
   }
   requestAnimationFrame(loop);
@@ -1158,6 +1159,10 @@
       tr.className = 'pick' + (openInfoWindows.has(p.id) ? ' row-open' : '');
       tr.innerHTML = `<td><span class="swatch" style="background:${photonColor(p,1)}"></span>${p.id}</td><td>${p.charge.toFixed(2)}</td><td>${p.maxSpeed.toFixed(0)} px/s</td><td>${p.energy.toFixed(2)}</td><td>${p.mass.toFixed(2)}</td><td>${p.force.toFixed(0)}</td><td>${p.forceRange.toFixed(0)}</td><td><button class="var-del row-del" title="Usuń foton z symulacji">✕</button></td>`;
       tr.addEventListener('click', () => selectPhoton(p.id));
+      tr.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        showCtxMenuAt(e.clientX, e.clientY);
+      });
       tr.querySelector('.row-del').addEventListener('click', (e) => {
         e.stopPropagation(); // don't also trigger the row's own click (select) handler
         removePhotonsByIds([p.id]);
@@ -1177,6 +1182,158 @@
       removeDynamicDockIcon('list');
     } else {
       minimizeWin(winList, null);
+    }
+  }
+
+  // ---------- right-click context menu (list rows) ----------
+  const ctxMenu = document.getElementById('ctxMenu');
+  const ctxReactorBtn = document.getElementById('ctxReactorBtn');
+  function hideCtxMenu() { ctxMenu.classList.remove('open'); }
+  function showCtxMenuAt(x, y) {
+    ctxMenu.style.left = x + 'px';
+    ctxMenu.style.top = y + 'px';
+    ctxMenu.classList.add('open');
+  }
+  window.addEventListener('click', hideCtxMenu);
+  window.addEventListener('blur', hideCtxMenu);
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideCtxMenu(); });
+  ctxReactorBtn.addEventListener('click', () => {
+    openReactor(Array.from(listSelection));
+    hideCtxMenu();
+  });
+
+  // ---------- reactor windows: isolated mini-simulation of a chosen photon subset ----------
+  // each is its own small toroidal world with its own photon clones (same physics
+  // identity as the originals, fresh random position/direction) — completely
+  // detached from the main simulation once opened, so it keeps "flying" on its own.
+  const REACTOR_SIZE = 200;
+  let reactorSeq = 0;
+  const reactors = [];
+
+  function makeReactorPhoton(src) {
+    const angle = rand(0, Math.PI * 2);
+    return {
+      x: rand(0, REACTOR_SIZE), y: rand(0, REACTOR_SIZE),
+      vx: Math.cos(angle) * src.maxSpeed, vy: Math.sin(angle) * src.maxSpeed,
+      charge: src.charge, mass: src.mass, maxSpeed: src.maxSpeed,
+      energy: src.energy, force: src.force, forceRange: src.forceRange, periods: src.periods,
+      radius: PHOTON_RADIUS
+    };
+  }
+
+  function closeReactor(reactor) {
+    const i = reactors.indexOf(reactor);
+    if (i === -1) return;
+    if (reactor.el._resizeObserver) reactor.el._resizeObserver.disconnect();
+    reactor.el.remove();
+    reactors.splice(i, 1);
+    delete windowState[reactor.el.id];
+    saveWindowState();
+  }
+
+  function openReactor(ids) {
+    const srcPhotons = ids.map(findPhoton).filter(Boolean);
+    if (srcPhotons.length === 0) return;
+
+    const n = reactors.length;
+    const el = document.createElement('div');
+    el.className = 'window reactor-window';
+    el.id = 'reactor-' + (++reactorSeq);
+    el.style.top = (60 + (n % 10) * 24) + 'px';
+    el.style.left = (320 + (n % 10) * 24) + 'px';
+    el.innerHTML = `
+      <div class="window-header">
+        <span>Reaktor</span>
+        <div class="window-btns">
+          <button class="win-min" title="Minimalizuj">–</button>
+          <button class="win-close" title="Zamknij">✕</button>
+        </div>
+      </div>
+      <div class="window-body"><canvas width="${REACTOR_SIZE}" height="${REACTOR_SIZE}"></canvas></div>
+    `;
+    document.body.appendChild(el);
+
+    const canvas = el.querySelector('canvas');
+    const reactor = { el, ctx: canvas.getContext('2d'), photons: srcPhotons.map(makeReactorPhoton) };
+    reactors.push(reactor);
+
+    makeDraggable(el);
+    el.querySelector('.win-min').addEventListener('click', () => minimizeWin(el, null));
+    el.querySelector('.win-close').addEventListener('click', () => closeReactor(reactor));
+  }
+
+  // same pairwise sine-wave force law as the main step() (see there for the physics
+  // explanation), but brute-force — a reactor only ever holds a small hand-picked
+  // subset of photons, so the O(n) spatial grid isn't worth the extra complexity here.
+  function stepReactor(r, dt) {
+    const n = r.photons.length;
+    if (n === 0) return;
+    const ax = new Float64Array(n), ay = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      const a = r.photons[i];
+      for (let j = i + 1; j < n; j++) {
+        const b = r.photons[j];
+        let dx = wrapDelta(b.x - a.x, REACTOR_SIZE);
+        let dy = wrapDelta(b.y - a.y, REACTOR_SIZE);
+        let d = Math.sqrt(dx * dx + dy * dy);
+        if (d < 0.01) {
+          const ang = Math.random() * Math.PI * 2;
+          d = 0.1; dx = Math.cos(ang) * d; dy = Math.sin(ang) * d;
+        }
+        const range = (a.forceRange + b.forceRange) / 2;
+        if (d >= range) continue;
+        const ux = dx / d, uy = dy / d;
+        let f;
+        if (d < HARD_CORE_R) {
+          const falloff = 1 - d / HARD_CORE_R;
+          f = -HARD_CORE_K * falloff / (d + 2);
+        } else {
+          const amp = (a.force + b.force) / 2;
+          const periodsAvg = (a.periods + b.periods) / 2;
+          const phaseSign = a.charge * b.charge < 0 ? 1 : -1;
+          const envelope = 1 - d / range;
+          f = phaseSign * amp * Math.sin(2 * Math.PI * periodsAvg * d / range) * envelope;
+        }
+        const fx = ux * f, fy = uy * f;
+        ax[i] += fx; ay[i] += fy;
+        ax[j] -= fx; ay[j] -= fy;
+      }
+    }
+    for (let i = 0; i < n; i++) {
+      const p = r.photons[i];
+      p.vx += (ax[i] / p.mass) * dt;
+      p.vy += (ay[i] / p.mass) * dt;
+      const s = Math.hypot(p.vx, p.vy);
+      if (s > 0.0001) {
+        const k = p.maxSpeed / s;
+        p.vx *= k; p.vy *= k;
+      } else {
+        const ang = rand(0, Math.PI * 2);
+        p.vx = Math.cos(ang) * p.maxSpeed; p.vy = Math.sin(ang) * p.maxSpeed;
+      }
+      p.x = wrap(p.x + p.vx * dt, REACTOR_SIZE);
+      p.y = wrap(p.y + p.vy * dt, REACTOR_SIZE);
+    }
+  }
+
+  function renderReactor(r) {
+    if (r.el.classList.contains('minimized')) return;
+    const ctx = r.ctx;
+    ctx.clearRect(0, 0, REACTOR_SIZE, REACTOR_SIZE);
+    ctx.fillStyle = '#05060a';
+    ctx.fillRect(0, 0, REACTOR_SIZE, REACTOR_SIZE);
+    for (const p of r.photons) {
+      ctx.fillStyle = photonColor(p, 0.95);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function updateReactors(dt) {
+    for (const r of reactors) {
+      if (!paused) stepReactor(r, dt);
+      renderReactor(r);
     }
   }
 

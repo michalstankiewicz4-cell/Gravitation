@@ -141,6 +141,26 @@
 
   .hidden { display: none !important; }
 
+  /* --- right-click context menu (list rows) --- */
+  #ctxMenu {
+    position: fixed; z-index: 50; display: none;
+    background: rgba(14, 17, 27, 0.98); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    padding: 4px; min-width: 130px;
+  }
+  #ctxMenu.open { display: block; }
+  #ctxMenu button {
+    display: block; width: 100%; text-align: left;
+    background: none; border: none; color: #c7cfe4;
+    padding: 7px 10px; border-radius: 4px; font-size: 13px; cursor: pointer;
+  }
+  #ctxMenu button:hover { background: #232b42; color: #fff; }
+
+  /* --- reactor windows: small isolated preview of a chosen photon subset --- */
+  .reactor-window { width: 222px; }
+  .reactor-window .window-body { padding: 0; }
+  .reactor-window canvas { display: block; background: #05060a; }
+
   /* --- zoom indicator: vertical gauge, right edge, purely informational --- */
   #zoomIndicator {
     position: fixed; right: 10px; top: 50%; transform: translateY(-50%);
