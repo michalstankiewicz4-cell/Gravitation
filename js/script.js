@@ -1198,7 +1198,10 @@
   window.addEventListener('blur', hideCtxMenu);
   window.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideCtxMenu(); });
   ctxReactorBtn.addEventListener('click', () => {
-    openReactor(Array.from(listSelection));
+    // only photons with a currently open info window — listSelection also holds
+    // rows that stayed listed after their window was closed (kept on purpose so the
+    // list preserves history), which isn't "currently selected" for this purpose
+    openReactor(Array.from(openInfoWindows.keys()));
     hideCtxMenu();
   });
 
