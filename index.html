@@ -327,16 +327,7 @@
   </div>
 </div>
 
-<div class="window minimized" id="winInfo" style="top:60px; right:284px;">
-  <div class="window-header">
-    <span id="infoTitle">Foton</span>
-    <div class="window-btns">
-      <button class="win-min" title="Minimalizuj">–</button>
-      <button class="win-close" title="Zamknij">✕</button>
-    </div>
-  </div>
-  <div class="window-body" id="infoBody"></div>
-</div>
+<!-- photon info windows are created dynamically (one per selected photon) — see openInfoWindow() -->
 
 <div id="dock">
   <button class="dock-icon active" id="dockStats">Statystyki</button>
@@ -819,7 +810,7 @@
     else if (colorMode === 'speed') updateSpeedRange();
 
     for (const p of photons) {
-      const isSelected = p.id === selectedId;
+      const isSelected = openInfoWindows.has(p.id);
       const isInList = listSelection.has(p.id);
       const color = photonColor(p, 0.95);
       if (glow) ctx.shadowColor = color;
@@ -1357,19 +1348,17 @@
   });
 
   // ---------- selection state ----------
-  let selectedId = null;
+  // one independent floating window per selected photon, so picking a new one from
+  // the list doesn't close whichever ones are already open — keyed by photon id.
   let listSelection = new Set();
-
-  const winInfo = document.getElementById('winInfo');
-  const infoTitle = document.getElementById('infoTitle');
-  const infoBody = document.getElementById('infoBody');
+  const openInfoWindows = new Map(); // photon id -> { el, titleEl, bodyEl }
 
   function findPhoton(id) { return photons.find(p => p.id === id); }
 
-  function renderInfoPanel(p) {
-    infoTitle.textContent = 'Foton #' + p.id;
+  function renderInfoPanel(p, w) {
+    w.titleEl.textContent = 'Foton #' + p.id;
     const speed = Math.hypot(p.vx, p.vy);
-    infoBody.innerHTML = `
+    w.bodyEl.innerHTML = `
       <div class="row"><span class="k"><span class="swatch" style="background:${photonColor(p,1)}"></span>Ładunek</span><span class="v">${p.charge.toFixed(2)}</span></div>
       <div class="row"><span class="k">Szybkość (aktualna)</span><span class="v">${speed.toFixed(1)} px/s</span></div>
       <div class="row"><span class="k">Szybkość (maks.)</span><span class="v">${p.maxSpeed.toFixed(1)} px/s</span></div>
@@ -1382,20 +1371,62 @@
     `;
   }
 
+  function closeInfoWindow(id) {
+    const w = openInfoWindows.get(id);
+    if (!w) return;
+    w.el.remove();
+    openInfoWindows.delete(id);
+    removeDynamicDockIcon('info-' + id);
+  }
+
+  function openInfoWindow(p) {
+    let w = openInfoWindows.get(p.id);
+    if (w) {
+      restoreWin(w.el, null);
+      removeDynamicDockIcon('info-' + p.id);
+      renderInfoPanel(p, w);
+      return;
+    }
+    const n = openInfoWindows.size;
+    const el = document.createElement('div');
+    el.className = 'window';
+    el.id = 'winInfo-' + p.id;
+    el.style.top = (60 + (n % 10) * 24) + 'px';
+    el.style.right = (16 + (n % 10) * 24) + 'px';
+    el.innerHTML = `
+      <div class="window-header">
+        <span class="info-title"></span>
+        <div class="window-btns">
+          <button class="win-min" title="Minimalizuj">–</button>
+          <button class="win-close" title="Zamknij">✕</button>
+        </div>
+      </div>
+      <div class="window-body"></div>
+    `;
+    document.body.appendChild(el);
+    w = { el, titleEl: el.querySelector('.info-title'), bodyEl: el.querySelector('.window-body') };
+    openInfoWindows.set(p.id, w);
+    makeDraggable(el);
+    el.querySelector('.win-min').addEventListener('click', () => {
+      minimizeWin(el, null);
+      addDynamicDockIcon('info-' + p.id, 'Foton #' + p.id, () => { restoreWin(el, null); removeDynamicDockIcon('info-' + p.id); });
+    });
+    el.querySelector('.win-close').addEventListener('click', () => closeInfoWindow(p.id));
+    renderInfoPanel(p, w);
+  }
+
   function updateInfoPanelIfOpen() {
-    if (selectedId == null) return;
-    const p = findPhoton(selectedId);
-    if (!p) { minimizeWin(winInfo, null); selectedId = null; return; }
-    renderInfoPanel(p);
+    for (const [id, w] of openInfoWindows) {
+      const p = findPhoton(id);
+      if (!p) { closeInfoWindow(id); continue; }
+      renderInfoPanel(p, w);
+    }
   }
 
   function selectPhoton(id) {
-    selectedId = id;
     const p = findPhoton(id);
     if (!p) return;
-    renderInfoPanel(p);
-    restoreWin(winInfo, null);
-    removeDynamicDockIcon('info');
+    openInfoWindow(p);
   }
 
   // removes photons from the simulation outright (not just from the selection) —
@@ -1404,11 +1435,7 @@
     const idSet = ids instanceof Set ? ids : new Set(ids);
     if (idSet.size === 0) return;
     photons = photons.filter(p => !idSet.has(p.id));
-    if (selectedId != null && idSet.has(selectedId)) {
-      selectedId = null;
-      minimizeWin(winInfo, null);
-      removeDynamicDockIcon('info');
-    }
+    for (const id of idSet) closeInfoWindow(id);
   }
 
   // ---------- list window (rectangle selection result) ----------
@@ -1598,17 +1625,8 @@
     if (saved && saved.minimized) minimizeWin(win, dockBtn);
   });
 
-  // contextual windows: info / list — dock icon only appears while minimized
-  makeDraggable(winInfo);
-  winInfo.querySelector('.win-min').addEventListener('click', () => {
-    minimizeWin(winInfo, null);
-    if (selectedId != null) addDynamicDockIcon('info', 'Foton #' + selectedId, () => { restoreWin(winInfo, null); removeDynamicDockIcon('info'); });
-  });
-  winInfo.querySelector('.win-close').addEventListener('click', () => {
-    minimizeWin(winInfo, null);
-    selectedId = null;
-    removeDynamicDockIcon('info');
-  });
+  // contextual window: list — dock icon only appears while minimized. Photon info
+  // windows are created/wired on demand in openInfoWindow() (one per photon).
 
   makeDraggable(winList);
   winList.querySelector('.win-min').addEventListener('click', () => {
