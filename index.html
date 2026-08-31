@@ -157,11 +157,8 @@
   <div class="window-body">
     <div class="field-hint">Siła między fotonami jest sinusoidalna — na przemian przyciąga i odpycha wraz z odległością, aż zaniknie na <code>forceRange</code>. <code>periods</code> to liczba pełnych okresów fali w tym zasięgu (może być ułamkowa). Przeciwne ładunki i takie same są przesunięte w fazie o pół okresu, więc w tej samej „warstwie” jedne się przyciągają, a drugie odpychają. Możesz dodawać własne zmienne pomocnicze (przycisk niżej) i edytować wzory — dostępne funkcje: <code>rand, abs, min, max, sqrt, pow, round, floor, ceil</code>. Strzałkami zmienisz kolejność obliczania.</div>
     <label class="field-hint" style="display:block; margin-bottom:8px;">
-      Model siły:
-      <select id="forceProfileSelect" style="width:100%; margin-top:3px; background:#12172a; color:#e8ecf5; border:1px solid rgba(255,255,255,0.15); border-radius:4px; padding:4px;">
-        <option value="classic">Klasyczny (fala) — ten sam ładunek może się chwilami przyciągać</option>
-        <option value="no-attract-same">Bez przyciągania tego samego ładunku</option>
-      </select>
+      Przesunięcie fali (0 = klasyczna, może przyciągać ten sam ładunek • 1 = nigdy się nie przyciąga): <span id="waveOffsetVal">0.00</span>
+      <input type="range" id="waveOffsetSlider" min="0" max="1" step="0.01" value="0" style="width:100%; margin-top:3px;">
     </label>
     <div id="editorRows"></div>
     <button class="add-var-btn" id="addVarBtn">+ Dodaj zmienną pomocniczą</button>

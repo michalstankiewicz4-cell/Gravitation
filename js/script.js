@@ -317,17 +317,17 @@
   const HARD_CORE_R = 1;
   const HARD_CORE_K = 4000;
 
-  // force model: 'classic' keeps the raw sine, which alternates sign every half
-  // period — so even same-charge pairs attract in some distance bands, since
-  // phaseSign only flips which half of the wave is which. 'no-attract-same' takes
-  // the absolute value of the wave instead: intensity still varies with distance,
-  // but the sign (attract vs repel) never flips, so like charges always repel and
-  // opposite charges always attract. Shared by step(), the reactor, and both force
-  // previews, so switching it in the editor affects everything consistently.
-  let forceProfile = 'classic'; // 'classic' | 'no-attract-same'
+  // force model: the raw sine alternates sign every half period, so even
+  // same-charge pairs attract in some distance bands (phaseSign only flips which
+  // half of the wave is which). waveOffset shifts the wave up before rescaling it
+  // back to a comparable range — at 0 it's the untouched classic wave; at 1 the
+  // trough just touches zero, so the sign never flips (like charges always repel,
+  // opposite charges always attract); values in between make the flip rarer without
+  // banning it outright. Shared by step(), the reactor, and both force previews.
+  let waveOffset = 0; // 0..1
   function waveTerm(d, range, periods) {
     const raw = Math.sin(2 * Math.PI * periods * d / range);
-    return forceProfile === 'no-attract-same' ? Math.abs(raw) : raw;
+    return (raw + waveOffset) / (1 + waveOffset);
   }
   const BRUSH_RADIUS = 160;    // reach of the "przyciąganie" brush
   const BRUSH_STRENGTH = 2600; // pull strength of the "przyciąganie" brush
@@ -1036,9 +1036,14 @@
     reader.readAsText(file);
   });
 
-  const forceProfileSelect = document.getElementById('forceProfileSelect');
-  forceProfileSelect.value = forceProfile;
-  forceProfileSelect.addEventListener('change', () => { forceProfile = forceProfileSelect.value; });
+  const waveOffsetSlider = document.getElementById('waveOffsetSlider');
+  const waveOffsetVal = document.getElementById('waveOffsetVal');
+  waveOffsetSlider.value = waveOffset;
+  waveOffsetVal.textContent = waveOffset.toFixed(2);
+  waveOffsetSlider.addEventListener('input', () => {
+    waveOffset = parseFloat(waveOffsetSlider.value);
+    waveOffsetVal.textContent = waveOffset.toFixed(2);
+  });
 
   // ---------- selection state ----------
   // one independent floating window per selected photon, so picking a new one from
