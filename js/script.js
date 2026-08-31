@@ -1210,6 +1210,7 @@
   // identity as the originals, fresh random position/direction) — completely
   // detached from the main simulation once opened, so it keeps "flying" on its own.
   const REACTOR_SIZE = 200;
+  const TRAIL_MAX = 120; // points kept per photon before the oldest end fades off
   let reactorSeq = 0;
   const reactors = [];
 
@@ -1220,7 +1221,7 @@
       vx: Math.cos(angle) * src.maxSpeed, vy: Math.sin(angle) * src.maxSpeed,
       charge: src.charge, mass: src.mass, maxSpeed: src.maxSpeed,
       energy: src.energy, force: src.force, forceRange: src.forceRange, periods: src.periods,
-      radius: PHOTON_RADIUS
+      radius: PHOTON_RADIUS, trail: []
     };
   }
 
@@ -1248,6 +1249,7 @@
       <div class="window-header">
         <span>Reaktor</span>
         <div class="window-btns">
+          <button class="reactor-clear" title="Wyczyść ślady">🧹</button>
           <button class="win-min" title="Minimalizuj">–</button>
           <button class="win-close" title="Zamknij">✕</button>
         </div>
@@ -1263,6 +1265,9 @@
     makeDraggable(el);
     el.querySelector('.win-min').addEventListener('click', () => minimizeWin(el, null));
     el.querySelector('.win-close').addEventListener('click', () => closeReactor(reactor));
+    el.querySelector('.reactor-clear').addEventListener('click', () => {
+      reactor.photons.forEach(p => { p.trail.length = 0; });
+    });
   }
 
   // same pairwise sine-wave force law as the main step() (see there for the physics
@@ -1316,6 +1321,9 @@
       }
       p.x = wrap(p.x + p.vx * dt, REACTOR_SIZE);
       p.y = wrap(p.y + p.vy * dt, REACTOR_SIZE);
+
+      p.trail.push({ x: p.x, y: p.y });
+      if (p.trail.length > TRAIL_MAX) p.trail.shift();
     }
   }
 
@@ -1326,6 +1334,23 @@
     ctx.fillStyle = '#05060a';
     ctx.fillRect(0, 0, REACTOR_SIZE, REACTOR_SIZE);
     for (const p of r.photons) {
+      if (p.trail.length > 1) {
+        ctx.strokeStyle = photonColor(p, 0.35);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(p.trail[0].x, p.trail[0].y);
+        for (let i = 1; i < p.trail.length; i++) {
+          const prev = p.trail[i - 1], pt = p.trail[i];
+          // a big jump means the photon wrapped around the edge — start a new
+          // segment there instead of drawing a line straight across the box
+          if (Math.abs(pt.x - prev.x) > REACTOR_SIZE / 2 || Math.abs(pt.y - prev.y) > REACTOR_SIZE / 2) {
+            ctx.moveTo(pt.x, pt.y);
+          } else {
+            ctx.lineTo(pt.x, pt.y);
+          }
+        }
+        ctx.stroke();
+      }
       ctx.fillStyle = photonColor(p, 0.95);
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
