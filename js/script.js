@@ -1034,9 +1034,12 @@
   function closeInfoWindow(id) {
     const w = openInfoWindows.get(id);
     if (!w) return;
+    if (w.el._resizeObserver) w.el._resizeObserver.disconnect();
     w.el.remove();
     openInfoWindows.delete(id);
     removeDynamicDockIcon('info-' + id);
+    delete windowState['winInfo-' + id];
+    saveWindowState();
   }
 
   function openInfoWindow(p) {
@@ -1175,6 +1178,7 @@
   function persistRect(win) {
     if (win.classList.contains('minimized')) return; // display:none -> zero rect
     const rect = win.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) return; // detached from the DOM — nothing real to save
     windowState[win.id] = Object.assign({}, windowState[win.id], {
       left: rect.left, top: rect.top, width: rect.width, height: rect.height
     });
@@ -1221,13 +1225,18 @@
       if (dragging) { dragging = false; persistRect(win); }
     });
 
-    // catches the native corner-drag resize (CSS `resize: both` on .window)
+    // catches the native corner-drag resize (CSS `resize: both` on .window). Stashed
+    // on the element so windows that get permanently removed (photon info windows)
+    // can disconnect it — otherwise it keeps firing (with a zero rect once detached)
+    // after the window is gone.
     if (window.ResizeObserver) {
       let resizeTimer = null;
-      new ResizeObserver(() => {
+      const ro = new ResizeObserver(() => {
         clearTimeout(resizeTimer);
         resizeTimer = setTimeout(() => persistRect(win), 150);
-      }).observe(win);
+      });
+      ro.observe(win);
+      win._resizeObserver = ro;
     }
 
     applySavedRect(win);
