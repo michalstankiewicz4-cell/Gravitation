@@ -88,6 +88,9 @@
   #winList th { color: #8b93ad; font-weight: 500; border-bottom: 1px solid rgba(255,255,255,0.08); position: sticky; top: 0; background: rgba(14,17,27,0.98); }
   #winList tr.pick { cursor: pointer; }
   #winList tr.pick:hover { background: rgba(255,255,255,0.06); }
+  #winList th.sortable { cursor: pointer; user-select: none; }
+  #winList th.sortable:hover { color: #e8ecf5; }
+  #winList .sort-arrow { display: inline-block; width: 10px; margin-left: 2px; font-size: 9px; color: #6c85c9; }
 
   #winForce { width: 412px; }
   #forceCanvas { display: block; width: 100%; height: auto; background: #05060a; border-radius: 6px; margin-top: 6px; }
@@ -251,7 +254,12 @@
   </div>
   <div class="window-body">
     <table>
-      <thead><tr><th>#</th><th>Ładunek</th><th>Szybkość</th><th></th></tr></thead>
+      <thead><tr>
+        <th class="sortable" data-sort-key="id" title="Sortuj wg Lp">#<span class="sort-arrow"></span></th>
+        <th class="sortable" data-sort-key="charge" title="Sortuj wg ładunku">Ładunek<span class="sort-arrow"></span></th>
+        <th class="sortable" data-sort-key="speed" title="Sortuj wg szybkości">Szybkość<span class="sort-arrow"></span></th>
+        <th></th>
+      </tr></thead>
       <tbody id="listBody"></tbody>
     </table>
   </div>
@@ -1401,13 +1409,32 @@
   // ---------- list window (rectangle selection result) ----------
   const winList = document.getElementById('winList');
   const listBody = document.getElementById('listBody');
+  const listSortHeaders = document.querySelectorAll('#winList th.sortable');
 
-  function showListPanel(ids) {
-    listSelection = new Set(ids);
+  let listSort = { key: 'id', dir: 1 }; // key: 'id' | 'charge' | 'speed'
+  const LIST_SORT_VALUE = { id: p => p.id, charge: p => p.charge, speed: p => p.maxSpeed };
+
+  function updateListSortHeaders() {
+    listSortHeaders.forEach(th => {
+      const arrow = th.querySelector('.sort-arrow');
+      arrow.textContent = th.dataset.sortKey === listSort.key ? (listSort.dir === 1 ? '▲' : '▼') : '';
+    });
+  }
+  listSortHeaders.forEach(th => {
+    th.addEventListener('click', () => {
+      const key = th.dataset.sortKey;
+      if (listSort.key === key) listSort.dir *= -1;
+      else listSort = { key, dir: 1 };
+      renderListBody();
+    });
+  });
+
+  function renderListBody() {
     listBody.innerHTML = '';
-    for (const id of ids) {
-      const p = findPhoton(id);
-      if (!p) continue;
+    const getVal = LIST_SORT_VALUE[listSort.key];
+    const ps = Array.from(listSelection).map(findPhoton).filter(Boolean)
+      .sort((a, b) => (getVal(a) - getVal(b)) * listSort.dir);
+    for (const p of ps) {
       const tr = document.createElement('tr');
       tr.className = 'pick';
       tr.innerHTML = `<td><span class="swatch" style="background:${photonColor(p,1)}"></span>${p.id}</td><td>${p.charge.toFixed(2)}</td><td>${p.maxSpeed.toFixed(0)} px/s</td><td><button class="var-del row-del" title="Usuń foton z symulacji">✕</button></td>`;
@@ -1416,10 +1443,16 @@
         e.stopPropagation(); // don't also trigger the row's own click (select) handler
         removePhotonsByIds([p.id]);
         listSelection.delete(p.id);
-        showListPanel(Array.from(listSelection));
+        showListPanel(Array.from(listSelection)); // also re-minimizes the window if that emptied the list
       });
       listBody.appendChild(tr);
     }
+    updateListSortHeaders();
+  }
+
+  function showListPanel(ids) {
+    listSelection = new Set(ids);
+    renderListBody();
     if (ids.length) {
       restoreWin(winList, null);
       removeDynamicDockIcon('list');
