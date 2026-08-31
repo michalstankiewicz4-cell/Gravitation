@@ -57,7 +57,7 @@
   updateZoomIndicator();
 
   // ---------- persisted settings: photon editor variables + rules ----------
-  const LS_KEY = 'photonSim.settings.v7';
+  const LS_KEY = 'photonSim.settings.v8'; // v8: added the waveOffset role
   // each row: { role, name, expr }. Rows with a "role" feed directly into the photon
   // (charge / mass / maxSpeed / energy / force / forceRange / periods) — exactly one
   // row per required role, and role never changes. Rows with role:null are helper/
@@ -71,7 +71,7 @@
   // periods * d / forceRange) * (1 - d/forceRange), sign-flipped for same-charge pairs.
   // That gives naturally repeating attract/repel "shells" out to forceRange, controlled
   // by how many wave "periods" fit in it — see step() for the exact formula.
-  const REQUIRED_ROLES = ['charge', 'mass', 'speed', 'energy', 'force', 'forceRange', 'periods'];
+  const REQUIRED_ROLES = ['charge', 'mass', 'speed', 'energy', 'force', 'forceRange', 'periods', 'waveOffset'];
   const DEFAULT_VARS = [
     { role: 'charge', name: 'charge', expr: 'rand(-1, 1)' },
     { role: 'mass',   name: 'mass',   expr: 'rand(0.5, 3)' },
@@ -79,9 +79,12 @@
     { role: 'energy', name: 'energy', expr: '10.5' },
     { role: 'force',  name: 'force',  expr: 'abs(charge) * 5000' },
     { role: 'forceRange', name: 'forceRange', expr: '100 + abs(charge) * 100' },
-    { role: 'periods', name: 'periods', expr: 'energy / 4' }
+    { role: 'periods', name: 'periods', expr: 'energy / 4' },
+    // shifts the pairwise force wave up before it's rescaled back (see waveTerm()):
+    // 0 = classic wave (can attract same charge in some shells), 1 = never flips sign
+    { role: 'waveOffset', name: 'waveOffset', expr: '0' }
   ];
-  const ROLE_FALLBACK = { charge: 0, mass: 1, speed: 50, energy: 10, force: 1000, forceRange: 100, periods: 2 };
+  const ROLE_FALLBACK = { charge: 0, mass: 1, speed: 50, energy: 10, force: 1000, forceRange: 100, periods: 2, waveOffset: 0 };
 
   function normalizeVariables(arr) {
     const ok = Array.isArray(arr) && arr.length >= REQUIRED_ROLES.length
@@ -214,13 +217,14 @@
     const force = clampNum(results.force, 0, 1000000, 1000);
     const forceRange = clampNum(results.forceRange, 5, 4000, 100);
     const periods = clampNum(results.periods, -50, 50, 2);
+    const waveOffset = clampNum(results.waveOffset, 0, 1, 0);
     const angle = rand(0, Math.PI * 2);
     const initSpeed = maxSpeed; // speed is always locked to the formula value — see step()
     return {
       id: nextId++,
       x: rand(0, W), y: rand(0, H),
       vx: Math.cos(angle) * initSpeed, vy: Math.sin(angle) * initSpeed,
-      charge, mass, maxSpeed, energy, force, forceRange, periods,
+      charge, mass, maxSpeed, energy, force, forceRange, periods, waveOffset,
       radius: PHOTON_RADIUS
     };
   }
@@ -241,6 +245,7 @@
       p.force = clampNum(results.force, 0, 1000000, p.force);
       p.forceRange = clampNum(results.forceRange, 5, 4000, p.forceRange);
       p.periods = clampNum(results.periods, -50, 50, p.periods);
+      p.waveOffset = clampNum(results.waveOffset, 0, 1, p.waveOffset);
     }
   }
 
@@ -319,15 +324,15 @@
 
   // force model: the raw sine alternates sign every half period, so even
   // same-charge pairs attract in some distance bands (phaseSign only flips which
-  // half of the wave is which). waveOffset shifts the wave up before rescaling it
-  // back to a comparable range — at 0 it's the untouched classic wave; at 1 the
-  // trough just touches zero, so the sign never flips (like charges always repel,
-  // opposite charges always attract); values in between make the flip rarer without
-  // banning it outright. Shared by step(), the reactor, and both force previews.
-  let waveOffset = 0; // 0..1
-  function waveTerm(d, range, periods) {
+  // half of the wave is which). waveOffset (a per-photon role, like periods or
+  // force — see DEFAULT_VARS) shifts the wave up before rescaling it back to a
+  // comparable range — at 0 it's the untouched classic wave; at 1 the trough just
+  // touches zero, so the sign never flips (like charges always repel, opposite
+  // charges always attract); values in between make the flip rarer without banning
+  // it outright. Shared by step(), the reactor, and both force previews.
+  function waveTerm(d, range, periods, offset) {
     const raw = Math.sin(2 * Math.PI * periods * d / range);
-    return (raw + waveOffset) / (1 + waveOffset);
+    return (raw + offset) / (1 + offset);
   }
   const BRUSH_RADIUS = 160;    // reach of the "przyciąganie" brush
   const BRUSH_STRENGTH = 2600; // pull strength of the "przyciąganie" brush
@@ -416,10 +421,11 @@
             // that flips again at the next ring, and so on.
             const amp = (a.force + b.force) / 2;
             const periodsAvg = (a.periods + b.periods) / 2;
+            const offsetAvg = (a.waveOffset + b.waveOffset) / 2;
             const chargeProduct = a.charge * b.charge;
             const phaseSign = chargeProduct < 0 ? 1 : -1;
             const envelope = 1 - d / range; // fades to 0 at the outer edge, no hard jump
-            f = phaseSign * amp * waveTerm(d, range, periodsAvg) * envelope;
+            f = phaseSign * amp * waveTerm(d, range, periodsAvg, offsetAvg) * envelope;
           }
 
           const fx = ux * f, fy = uy * f;
@@ -620,6 +626,7 @@
     const range = ev.forceRange;
     const amp = Math.max(1, ev.force);
     const periods = ev.periods;
+    const offset = ev.waveOffset;
     const maxRpx = range * scale;
     if (maxRpx <= 0) return;
     const grad = fctx.createRadialGradient(cx, cy, 0, cx, cy, maxRpx);
@@ -632,7 +639,7 @@
         stopColor = 'rgba(255,80,80,0.9)';
       } else {
         const envelope = 1 - d / range;
-        const raw = waveTerm(d, range, periods) * envelope;
+        const raw = waveTerm(d, range, periods, offset) * envelope;
         const alpha = Math.min(1, Math.abs(raw)) * 0.8;
         stopColor = raw >= 0
           ? baseColor.replace(/,[^,]*\)$/, ',' + alpha.toFixed(3) + ')')
@@ -690,7 +697,7 @@
 
   // same force law as step()'s pairwise loop, evaluated for a single pair so it
   // can be plotted as a curve instead of applied to real photons.
-  function sinForceAt(d, range, amp, periodsAvg, chargeProduct) {
+  function sinForceAt(d, range, amp, periodsAvg, chargeProduct, offsetAvg) {
     if (d < HARD_CORE_R) {
       const falloff = 1 - d / HARD_CORE_R;
       return -HARD_CORE_K * falloff / (d + 2);
@@ -698,7 +705,7 @@
     if (d >= range) return 0;
     const phaseSign = chargeProduct < 0 ? 1 : -1;
     const envelope = 1 - d / range;
-    return phaseSign * amp * waveTerm(d, range, periodsAvg) * envelope;
+    return phaseSign * amp * waveTerm(d, range, periodsAvg, offsetAvg) * envelope;
   }
 
   function renderForceGraph() {
@@ -716,6 +723,7 @@
     const range = (pos.forceRange + neg.forceRange) / 2;
     const amp = (pos.force + neg.force) / 2;
     const periodsAvg = (pos.periods + neg.periods) / 2;
+    const offsetAvg = (pos.waveOffset + neg.waveOffset) / 2;
 
     const padL = 44, padR = 14, padT = 14, padB = 28;
     const plotW = w - padL - padR, plotH = h - padT - padB;
@@ -749,7 +757,7 @@
       const STEPS = 200;
       for (let i = 0; i <= STEPS; i++) {
         const d = (i / STEPS) * range;
-        const f = Math.max(-maxAmp, Math.min(maxAmp, sinForceAt(d, range, amp, periodsAvg, chargeProduct)));
+        const f = Math.max(-maxAmp, Math.min(maxAmp, sinForceAt(d, range, amp, periodsAvg, chargeProduct, offsetAvg)));
         const x = xForD(d), y = yForF(f);
         if (i === 0) gctx.moveTo(x, y); else gctx.lineTo(x, y);
       }
@@ -1036,15 +1044,6 @@
     reader.readAsText(file);
   });
 
-  const waveOffsetSlider = document.getElementById('waveOffsetSlider');
-  const waveOffsetVal = document.getElementById('waveOffsetVal');
-  waveOffsetSlider.value = waveOffset;
-  waveOffsetVal.textContent = waveOffset.toFixed(2);
-  waveOffsetSlider.addEventListener('input', () => {
-    waveOffset = parseFloat(waveOffsetSlider.value);
-    waveOffsetVal.textContent = waveOffset.toFixed(2);
-  });
-
   // ---------- selection state ----------
   // one independent floating window per selected photon, so picking a new one from
   // the list doesn't close whichever ones are already open — keyed by photon id.
@@ -1065,6 +1064,7 @@
       <div class="row"><span class="k">Amplituda siły</span><span class="v">${p.force.toFixed(0)}</span></div>
       <div class="row"><span class="k">Zasięg siły</span><span class="v">${p.forceRange.toFixed(0)} px</span></div>
       <div class="row"><span class="k">Liczba okresów</span><span class="v">${p.periods.toFixed(2)}</span></div>
+      <div class="row"><span class="k">Przesunięcie fali</span><span class="v">${p.waveOffset.toFixed(2)}</span></div>
       <div class="row"><span class="k">Pozycja</span><span class="v">${p.x.toFixed(0)}, ${p.y.toFixed(0)}</span></div>
     `;
   }
@@ -1243,7 +1243,7 @@
       vx: Math.cos(angle) * src.maxSpeed, vy: Math.sin(angle) * src.maxSpeed,
       charge: src.charge, mass: src.mass, maxSpeed: src.maxSpeed,
       energy: src.energy, force: src.force, forceRange: src.forceRange, periods: src.periods,
-      radius: PHOTON_RADIUS, trail: []
+      waveOffset: src.waveOffset, radius: PHOTON_RADIUS, trail: []
     };
   }
 
@@ -1320,9 +1320,10 @@
         } else {
           const amp = (a.force + b.force) / 2;
           const periodsAvg = (a.periods + b.periods) / 2;
+          const offsetAvg = (a.waveOffset + b.waveOffset) / 2;
           const phaseSign = a.charge * b.charge < 0 ? 1 : -1;
           const envelope = 1 - d / range;
-          f = phaseSign * amp * waveTerm(d, range, periodsAvg) * envelope;
+          f = phaseSign * amp * waveTerm(d, range, periodsAvg, offsetAvg) * envelope;
         }
         const fx = ux * f, fy = uy * f;
         ax[i] += fx; ay[i] += fy;
