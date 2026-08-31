@@ -82,8 +82,9 @@
   .row .v { font-variant-numeric: tabular-nums; }
   .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
 
+  #winList { width: 620px; }
   #winList table { border-collapse: collapse; width: 100%; }
-  #winList .window-body { padding: 4px 0; }
+  #winList .window-body { padding: 4px 0; overflow-x: auto; }
   #winList th, #winList td { text-align: left; padding: 5px 10px; font-size: 12px; white-space: nowrap; }
   #winList th { color: #8b93ad; font-weight: 500; border-bottom: 1px solid rgba(255,255,255,0.08); position: sticky; top: 0; background: rgba(14,17,27,0.98); }
   #winList tr.pick { cursor: pointer; }
@@ -258,6 +259,10 @@
         <th class="sortable" data-sort-key="id" title="Sortuj wg Lp">#<span class="sort-arrow"></span></th>
         <th class="sortable" data-sort-key="charge" title="Sortuj wg ładunku">Ładunek<span class="sort-arrow"></span></th>
         <th class="sortable" data-sort-key="speed" title="Sortuj wg szybkości">Szybkość<span class="sort-arrow"></span></th>
+        <th class="sortable" data-sort-key="energy" title="Sortuj wg energii">Energia<span class="sort-arrow"></span></th>
+        <th class="sortable" data-sort-key="mass" title="Sortuj wg masy">Masa<span class="sort-arrow"></span></th>
+        <th class="sortable" data-sort-key="force" title="Sortuj wg force">Force<span class="sort-arrow"></span></th>
+        <th class="sortable" data-sort-key="forceRange" title="Sortuj wg zasięgu">Zasięg<span class="sort-arrow"></span></th>
         <th></th>
       </tr></thead>
       <tbody id="listBody"></tbody>
@@ -1412,7 +1417,10 @@
   const listSortHeaders = document.querySelectorAll('#winList th.sortable');
 
   let listSort = { key: 'id', dir: 1 }; // key: 'id' | 'charge' | 'speed'
-  const LIST_SORT_VALUE = { id: p => p.id, charge: p => p.charge, speed: p => p.maxSpeed };
+  const LIST_SORT_VALUE = {
+    id: p => p.id, charge: p => p.charge, speed: p => p.maxSpeed,
+    energy: p => p.energy, mass: p => p.mass, force: p => p.force, forceRange: p => p.forceRange
+  };
 
   function updateListSortHeaders() {
     listSortHeaders.forEach(th => {
@@ -1437,7 +1445,7 @@
     for (const p of ps) {
       const tr = document.createElement('tr');
       tr.className = 'pick';
-      tr.innerHTML = `<td><span class="swatch" style="background:${photonColor(p,1)}"></span>${p.id}</td><td>${p.charge.toFixed(2)}</td><td>${p.maxSpeed.toFixed(0)} px/s</td><td><button class="var-del row-del" title="Usuń foton z symulacji">✕</button></td>`;
+      tr.innerHTML = `<td><span class="swatch" style="background:${photonColor(p,1)}"></span>${p.id}</td><td>${p.charge.toFixed(2)}</td><td>${p.maxSpeed.toFixed(0)} px/s</td><td>${p.energy.toFixed(2)}</td><td>${p.mass.toFixed(2)}</td><td>${p.force.toFixed(0)}</td><td>${p.forceRange.toFixed(0)}</td><td><button class="var-del row-del" title="Usuń foton z symulacji">✕</button></td>`;
       tr.addEventListener('click', () => selectPhoton(p.id));
       tr.querySelector('.row-del').addEventListener('click', (e) => {
         e.stopPropagation(); // don't also trigger the row's own click (select) handler
