@@ -32,6 +32,10 @@
   #speedRow input[type=range] { width: 140px; }
   #speedVal { min-width: 34px; display: inline-block; }
   #hint { margin-left: auto; font-size: 12px; color: #6c7690; }
+  #clearDataBtn {
+    background: #3a1c1c; color: #ffb4b4; border: 1px solid rgba(255,107,107,0.35);
+  }
+  #clearDataBtn:hover { background: #522525; }
 
   .toolgroup { display: flex; align-items: center; gap: 6px; }
   .tg-label { font-size: 12px; color: #8b93ad; margin-right: 2px; }
@@ -40,7 +44,7 @@
     border-radius: 6px; padding: 6px 12px; font-size: 13px; cursor: pointer;
   }
   .tool-btn:hover, .charge-btn:hover { background: #232b42; }
-  .tool-btn.active, .charge-btn.active { background: #3a4a7a; border-color: #6c85c9; color: #fff; }
+  .tool-btn.active, .charge-btn.active { background: #3a4a7a; border-color: #6c85c9; color: #fff; box-shadow: 0 0 0 1px #6c85c9; }
   .charge-btn { padding: 6px 10px; min-width: 30px; text-align: center; }
 
   /* --- floating windows: draggable, minimizable --- */
@@ -53,7 +57,9 @@
     width: 250px;
     font-size: 13px;
     display: flex; flex-direction: column;
-    max-height: 72vh;
+    max-height: 85vh; max-width: 92vw;
+    min-width: 190px; min-height: 90px;
+    resize: both; overflow: hidden;
   }
   .window.minimized { display: none !important; }
   .window-header {
@@ -69,7 +75,7 @@
     line-height: 1; padding: 3px 6px; border-radius: 4px;
   }
   .window-btns button:hover { color: #fff; background: rgba(255,255,255,0.08); }
-  .window-body { padding: 10px 12px; overflow-y: auto; }
+  .window-body { padding: 10px 12px; overflow-y: auto; flex: 1 1 auto; min-height: 0; }
 
   .row { display: flex; justify-content: space-between; padding: 3px 0; gap: 12px; }
   .row .k { color: #8b93ad; }
@@ -134,6 +140,30 @@
   .dock-icon.active { background: #3a4a7a; border-color: #6c85c9; color: #fff; }
 
   .hidden { display: none !important; }
+
+  /* --- zoom indicator: vertical gauge, right edge, purely informational --- */
+  #zoomIndicator {
+    position: fixed; right: 10px; top: 50%; transform: translateY(-50%);
+    z-index: 15; display: flex; flex-direction: column; align-items: center; gap: 6px;
+    pointer-events: none; user-select: none;
+  }
+  #zoomLabel {
+    font-size: 11px; color: #c7cfe4; font-variant-numeric: tabular-nums;
+    background: rgba(10,12,20,0.65); padding: 2px 6px; border-radius: 4px;
+  }
+  #zoomTrack {
+    width: 6px; height: 160px; background: rgba(255,255,255,0.12);
+    border-radius: 3px; position: relative; overflow: visible;
+  }
+  #zoomFill {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 0%;
+    background: linear-gradient(180deg, #8fa6e8, #3a4a7a);
+    border-radius: 3px;
+  }
+  #zoomDefaultTick {
+    position: absolute; left: -3px; right: -3px; height: 1px;
+    background: rgba(255,255,255,0.45);
+  }
 </style>
 </head>
 <body>
@@ -161,25 +191,57 @@
   </div>
 
   <div id="hint">Kliknij foton = szczegóły &nbsp;•&nbsp; przeciągnij prostokąt = lista fotonów</div>
+
+  <button id="clearDataBtn" title="Usuwa zapisane ustawienia edytora oraz rozmiar/pozycję okienek i przywraca wartości domyślne">Wyczyść dane</button>
 </div>
 
 <canvas id="sim"></canvas>
+
+<div id="zoomIndicator">
+  <div id="zoomLabel">1.0×</div>
+  <div id="zoomTrack">
+    <div id="zoomDefaultTick"></div>
+    <div id="zoomFill"></div>
+  </div>
+</div>
 
 <!-- left side: statistics + (contextual) selection list -->
 <div class="window" id="winStats" style="top:60px; left:16px;">
   <div class="window-header">
     <span>Statystyki</span>
-    <div class="window-btns"><button class="win-min" title="Minimalizuj">–</button></div>
+    <div class="window-btns">
+      <button id="statConfigBtn" title="Ustawienia statystyk">⚙</button>
+      <button class="win-min" title="Minimalizuj">–</button>
+    </div>
   </div>
   <div class="window-body">
-    <div class="row"><span class="k">Fotony</span><span class="v" id="statTotal">0</span></div>
-    <div class="row"><span class="k">Ładunek dodatni</span><span class="v" id="statPos">0</span></div>
-    <div class="row"><span class="k">Ładunek ujemny</span><span class="v" id="statNeg">0</span></div>
-    <div class="row"><span class="k">Zderzenia</span><span class="v" id="statCollisions">0</span></div>
+    <div class="row" data-stat-row="total"><span class="k">Fotony</span><span class="v" id="statTotal">0</span></div>
+    <div class="row" data-stat-row="pos"><span class="k">Ładunek dodatni</span><span class="v" id="statPos">0</span></div>
+    <div class="row" data-stat-row="neg"><span class="k">Ładunek ujemny</span><span class="v" id="statNeg">0</span></div>
+    <div class="row" data-stat-row="collisions"><span class="k">Zderzenia</span><span class="v" id="statCollisions">0</span></div>
+    <div class="row" data-stat-row="avgSpeed"><span class="k">Średnia prędkość</span><span class="v" id="statAvgSpeed">0</span></div>
   </div>
 </div>
 
-<div class="window minimized" id="winList" style="top:60px; left:284px;">
+<div class="window minimized" id="winStatConfig" style="top:60px; left:284px;">
+  <div class="window-header">
+    <span>Ustawienia statystyk</span>
+    <div class="window-btns">
+      <button class="win-min" title="Minimalizuj">–</button>
+      <button class="win-close" title="Zamknij">✕</button>
+    </div>
+  </div>
+  <div class="window-body">
+    <div class="field-hint">Wybierz, które dane mają się wyświetlać w oknie Statystyki.</div>
+    <label class="var-row"><input type="checkbox" class="stat-toggle" data-stat="total" checked> Fotony</label>
+    <label class="var-row"><input type="checkbox" class="stat-toggle" data-stat="pos" checked> Ładunek dodatni</label>
+    <label class="var-row"><input type="checkbox" class="stat-toggle" data-stat="neg" checked> Ładunek ujemny</label>
+    <label class="var-row"><input type="checkbox" class="stat-toggle" data-stat="collisions" checked> Zderzenia</label>
+    <label class="var-row"><input type="checkbox" class="stat-toggle" data-stat="avgSpeed"> Średnia prędkość</label>
+  </div>
+</div>
+
+<div class="window minimized" id="winList" style="top:60px; left:400px;">
   <div class="window-header">
     <span>Zaznaczone fotony</span>
     <div class="window-btns">
@@ -189,7 +251,7 @@
   </div>
   <div class="window-body">
     <table>
-      <thead><tr><th>#</th><th>Ładunek</th><th>Szybkość</th></tr></thead>
+      <thead><tr><th>#</th><th>Ładunek</th><th>Szybkość</th><th></th></tr></thead>
       <tbody id="listBody"></tbody>
     </table>
   </div>
@@ -217,17 +279,38 @@
   </div>
 </div>
 
+<!-- bottom: color filter -->
+<div class="window" id="winFilter" style="bottom:60px; left:16px;">
+  <div class="window-header">
+    <span>Filtr</span>
+    <div class="window-btns"><button class="win-min" title="Minimalizuj">–</button></div>
+  </div>
+  <div class="window-body">
+    <div class="field-hint">Sposób kolorowania fotonów na wykresie wg ładunku.</div>
+    <div class="toolgroup" id="colorModeGroup">
+      <button class="tool-btn active" data-color-mode="default" title="Trzy płaskie kolory bez gradientu: ujemny = niebieski, 0 = biały, dodatni = pomarańczowy">Domyślne</button>
+      <button class="tool-btn" data-color-mode="intensity" title="Skala dopasowana do aktualnego zakresu ładunków: 0 = biały, najsilniejszy obecny ładunek = pełne nasycenie">Natężenie wg ładunku</button>
+      <button class="tool-btn" data-color-mode="speed" title="Biały = najszybszy obecny foton, czerwony = najwolniejszy — wg rankingu (percentyla), nie surowej wartości, więc kolory rozkładają się równomiernie">Szybkość</button>
+    </div>
+  </div>
+</div>
+
 <!-- right side: photon editor, (contextual) photon info -->
 <div class="window" id="winEditor" style="top:60px; right:16px;">
   <div class="window-header">
     <span>Edytor fotonu</span>
-    <div class="window-btns"><button class="win-min" title="Minimalizuj">–</button></div>
+    <div class="window-btns">
+      <button id="exportVarsBtn" title="Eksportuj zmienne do pliku CSV">📤</button>
+      <button id="importVarsBtn" title="Importuj zmienne z pliku CSV">📥</button>
+      <button id="copyVarsBtn" title="Kopiuj zmienne do schowka">📋</button>
+      <button class="win-min" title="Minimalizuj">–</button>
+    </div>
   </div>
   <div class="window-body">
     <div class="field-hint">Siła między fotonami jest sinusoidalna — na przemian przyciąga i odpycha wraz z odległością, aż zaniknie na <code>forceRange</code>. <code>periods</code> to liczba pełnych okresów fali w tym zasięgu (może być ułamkowa). Przeciwne ładunki i takie same są przesunięte w fazie o pół okresu, więc w tej samej „warstwie” jedne się przyciągają, a drugie odpychają. Możesz dodawać własne zmienne pomocnicze (przycisk niżej) i edytować wzory — dostępne funkcje: <code>rand, abs, min, max, sqrt, pow, round, floor, ceil</code>. Strzałkami zmienisz kolejność obliczania.</div>
     <div id="editorRows"></div>
     <button class="add-var-btn" id="addVarBtn">+ Dodaj zmienną pomocniczą</button>
-    <button class="add-var-btn" id="copyVarsBtn">📋 Kopiuj zmienne do schowka</button>
+    <input type="file" id="importVarsInput" accept=".csv,text/csv" style="display:none">
   </div>
 </div>
 
@@ -247,6 +330,7 @@
   <button class="dock-icon active" id="dockEditor">Edytor fotonu</button>
   <button class="dock-icon active" id="dockForce">Podgląd sił</button>
   <button class="dock-icon active" id="dockForceGraph">Rozkład sił</button>
+  <button class="dock-icon active" id="dockFilter">Filtr</button>
 </div>
 
 <script>
@@ -280,6 +364,33 @@
     return d;
   }
   function rand(min, max) { return min + Math.random() * (max - min); }
+
+  // ---------- camera: mouse-wheel zoom ----------
+  // zoom 1 = the default view (world fills the screen 1:1). Camera zoom can go both
+  // ways from there: in, to inspect small clusters closely, or out, to see more of
+  // the toroidal world at once. camX/camY is the world point that lands at screen
+  // (0,0); left un-wrapped (can be any real number) so the tile loop in render() can
+  // treat the world as a plane tiled every W/H, which is what makes the wraparound
+  // visible when zoomed out.
+  let zoom = 1, camX = 0, camY = 0;
+  const MIN_ZOOM = 0.35, MAX_ZOOM = 8;
+
+  function screenToWorld(sx, sy) {
+    return { x: wrap(sx / zoom + camX, W), y: wrap(sy / zoom + camY, H) };
+  }
+
+  // log scale so the indicator has even resolution across the whole 0.35x-8x range,
+  // instead of the top half of the range (1x-8x) squeezing into a sliver of the bar
+  const zoomLabelEl = document.getElementById('zoomLabel');
+  const zoomFillEl = document.getElementById('zoomFill');
+  const zoomLogSpan = Math.log(MAX_ZOOM) - Math.log(MIN_ZOOM);
+  function zoomToFraction(z) { return (Math.log(z) - Math.log(MIN_ZOOM)) / zoomLogSpan; }
+  document.getElementById('zoomDefaultTick').style.bottom = (zoomToFraction(1) * 100) + '%';
+  function updateZoomIndicator() {
+    zoomLabelEl.textContent = zoom.toFixed(zoom < 1 ? 2 : 1) + '×';
+    zoomFillEl.style.height = (zoomToFraction(zoom) * 100) + '%';
+  }
+  updateZoomIndicator();
 
   // ---------- persisted settings: photon editor variables + rules ----------
   const LS_KEY = 'photonSim.settings.v7';
@@ -465,9 +576,8 @@
     refreshTimer = setTimeout(refreshAllPhotons, 150);
   }
 
-  function colorForCharge(q, alpha) {
-    // -1 -> cool blue, 0 -> white, +1 -> warm orange
-    const t = Math.max(-1, Math.min(1, q));
+  // shared white<->blue/orange blend for a signed fraction t in [-1, 1] (0 = white)
+  function blendChargeColor(t, alpha) {
     let r, g, b;
     if (t >= 0) {
       r = 255; g = Math.round(255 - t * 120); b = Math.round(255 - t * 210);
@@ -478,12 +588,59 @@
     return `rgba(${r},${g},${b},${alpha})`;
   }
 
+  function colorForCharge(q, alpha) {
+    // no gradient: just three flat colors — negative = cool blue, 0 = white, positive = warm orange
+    return blendChargeColor(q > 0 ? 1 : q < 0 ? -1 : 0, alpha);
+  }
+
+  // ---------- color filter: how photons are colored ----------
+  let colorMode = 'default'; // 'default' (flat ±/0) | 'intensity' (charge, scaled to range in play) | 'speed'
+  let maxAbsChargeSeen = 1;
+  function updateChargeRange() {
+    let m = 0;
+    for (const p of photons) { const a = Math.abs(p.charge); if (a > m) m = a; }
+    maxAbsChargeSeen = m || 1; // avoid div-by-zero when every photon has charge 0
+  }
+  function colorForChargeIntensity(q, alpha) {
+    // same white<->blue/orange blend, but normalized to whatever the strongest
+    // charge currently in the sim is, instead of a fixed ±1 — so 0 is always white
+    // and the most extreme photons present always reach full color, regardless of
+    // what range the editor's charge formula actually produces.
+    return blendChargeColor(Math.max(-1, Math.min(1, q / maxAbsChargeSeen)), alpha);
+  }
+
+  // min/max normalization looked broken for the default speed formula (100/mass):
+  // most photons bunch up at the slow end with a few fast outliers stretching the
+  // max, so almost everyone landed near the red end of a linear scale. Ranking by
+  // percentile instead spreads the colors evenly across whatever photons are
+  // actually present, regardless of how skewed the underlying speed distribution is.
+  let speedRank = new Map(); // photon id -> percentile in [0,1], 1 = fastest
+  function updateSpeedRange() {
+    speedRank = new Map();
+    const n = photons.length;
+    if (n === 0) return;
+    const sorted = photons.slice().sort((a, b) => a.maxSpeed - b.maxSpeed);
+    for (let i = 0; i < n; i++) speedRank.set(sorted[i].id, n > 1 ? i / (n - 1) : 1);
+  }
+  function colorForSpeed(p, alpha) {
+    // white = fastest photon currently in the sim, red = slowest
+    const t = speedRank.has(p.id) ? speedRank.get(p.id) : 1;
+    const g = Math.round(255 * t);
+    return `rgba(255,${g},${g},${alpha})`;
+  }
+
+  function photonColor(p, alpha) {
+    if (colorMode === 'intensity') return colorForChargeIntensity(p.charge, alpha);
+    if (colorMode === 'speed') return colorForSpeed(p, alpha);
+    return colorForCharge(p.charge, alpha);
+  }
+
   // ---------- physics ----------
   // Force between two photons is one continuous sine wave over distance instead of
   // separate repel/attract zones — see the pairwise loop in step() for the formula.
   // HARD_CORE_* is a small, fixed (not user-editable) safety repulsion: sin(0) = 0,
   // so without this nothing would stop two photons from landing on the same point.
-  const HARD_CORE_R = 6;
+  const HARD_CORE_R = 1;
   const HARD_CORE_K = 4000;
   const BRUSH_RADIUS = 160;    // reach of the "przyciąganie" brush
   const BRUSH_STRENGTH = 2600; // pull strength of the "przyciąganie" brush
@@ -542,8 +699,8 @@
           let d = Math.sqrt(dx * dx + dy * dy);
           if (d < 0.01) { dx = (Math.random() - 0.5) * 0.1; dy = (Math.random() - 0.5) * 0.1; d = 0.1; }
 
-          // pixel-perfect collision: same rendered pixel cell
-          if (Math.floor(a.x) === Math.floor(b.x) && Math.floor(a.y) === Math.floor(b.y)) {
+          // real collision: the two photon circles actually overlap
+          if (d < a.radius + b.radius) {
             newCollisionPairs.add(a.id < b.id ? (a.id + '_' + b.id) : (b.id + '_' + a.id));
           }
 
@@ -626,42 +783,50 @@
   }
 
   // ---------- rendering ----------
-  function drawWrapped(x, y, draw) {
-    const margin = 60;
-    const xs = [x];
-    const ys = [y];
-    if (x < margin) xs.push(x + W); else if (x > W - margin) xs.push(x - W);
-    if (y < margin) ys.push(y + H); else if (y > H - margin) ys.push(y - H);
-    for (const px of xs) for (const py of ys) draw(px, py);
-  }
-
   function render() {
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = '#05060a';
     ctx.fillRect(0, 0, W, H);
 
-    const glow = photons.length <= 500; // skip glow above this count to keep frame rate up
+    ctx.save();
+    ctx.scale(zoom, zoom);
+    ctx.translate(-camX, -camY);
+
+    // zoomed out past one screenful: figure out which repeats ("tiles") of the
+    // toroidal world are actually in view, so wrapping is visible instead of just
+    // fading to background past the edge of the default screenful.
+    const viewW = W / zoom, viewH = H / zoom;
+    const tileMinX = Math.floor(camX / W), tileMaxX = Math.floor((camX + viewW - 0.01) / W);
+    const tileMinY = Math.floor(camY / H), tileMaxY = Math.floor((camY + viewH - 0.01) / H);
+
+    const glow = photons.length <= 500 && zoom > 0.6; // skip glow when it'd cost too many draws
     ctx.shadowBlur = glow ? 12 : 0;
+
+    if (colorMode === 'intensity') updateChargeRange();
+    else if (colorMode === 'speed') updateSpeedRange();
 
     for (const p of photons) {
       const isSelected = p.id === selectedId;
       const isInList = listSelection.has(p.id);
-      const color = colorForCharge(p.charge, 0.95);
-      drawWrapped(p.x, p.y, (px, py) => {
-        if (glow) ctx.shadowColor = color;
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        ctx.arc(px, py, p.radius, 0, Math.PI * 2);
-        ctx.fill();
-
-        if (isInList || isSelected) {
+      const color = photonColor(p, 0.95);
+      if (glow) ctx.shadowColor = color;
+      ctx.fillStyle = color;
+      for (let tx = tileMinX; tx <= tileMaxX; tx++) {
+        for (let ty = tileMinY; ty <= tileMaxY; ty++) {
+          const px = p.x + tx * W, py = p.y + ty * H;
           ctx.beginPath();
-          ctx.arc(px, py, p.radius + (isSelected ? 7 : 4.5), 0, Math.PI * 2);
-          ctx.strokeStyle = isSelected ? '#ffffff' : 'rgba(255,255,255,0.55)';
-          ctx.lineWidth = isSelected ? 2 : 1.2;
-          ctx.stroke();
+          ctx.arc(px, py, p.radius, 0, Math.PI * 2);
+          ctx.fill();
+
+          if (isInList || isSelected) {
+            ctx.beginPath();
+            ctx.arc(px, py, p.radius + (isSelected ? 7 : 4.5), 0, Math.PI * 2);
+            ctx.strokeStyle = isSelected ? '#ffffff' : 'rgba(255,255,255,0.55)';
+            ctx.lineWidth = isSelected ? 2 : 1.2;
+            ctx.stroke();
+          }
         }
-      });
+      }
     }
     ctx.shadowBlur = 0;
 
@@ -696,6 +861,8 @@
       ctx.stroke();
       ctx.restore();
     }
+
+    ctx.restore();
   }
 
   // ---------- stats panel ----------
@@ -703,15 +870,50 @@
   const statPos = document.getElementById('statPos');
   const statNeg = document.getElementById('statNeg');
   const statCollisions = document.getElementById('statCollisions');
+  const statAvgSpeed = document.getElementById('statAvgSpeed');
 
   function updateStats() {
-    let pos = 0, neg = 0;
-    for (const p of photons) { if (p.charge > 0) pos++; else if (p.charge < 0) neg++; }
+    let pos = 0, neg = 0, speedSum = 0;
+    for (const p of photons) {
+      if (p.charge > 0) pos++; else if (p.charge < 0) neg++;
+      speedSum += p.maxSpeed;
+    }
     statTotal.textContent = photons.length;
     statPos.textContent = pos;
     statNeg.textContent = neg;
     statCollisions.textContent = collisionCount;
+    statAvgSpeed.textContent = (photons.length ? speedSum / photons.length : 0).toFixed(1) + ' px/s';
   }
+
+  // ---------- stats panel settings: which rows are shown, persisted ----------
+  const STATS_LS_KEY = 'photonSim.statVisibility.v1';
+  const DEFAULT_STAT_VISIBILITY = { total: true, pos: true, neg: true, collisions: true, avgSpeed: false };
+  function loadStatVisibility() {
+    try {
+      const raw = localStorage.getItem(STATS_LS_KEY);
+      return raw ? Object.assign({}, DEFAULT_STAT_VISIBILITY, JSON.parse(raw)) : Object.assign({}, DEFAULT_STAT_VISIBILITY);
+    } catch (e) { return Object.assign({}, DEFAULT_STAT_VISIBILITY); }
+  }
+  const statVisibility = loadStatVisibility();
+  function saveStatVisibility() {
+    try { localStorage.setItem(STATS_LS_KEY, JSON.stringify(statVisibility)); } catch (e) { /* ignore */ }
+  }
+  function applyStatVisibility() {
+    document.querySelectorAll('#winStats .row[data-stat-row]').forEach(row => {
+      row.classList.toggle('hidden', !statVisibility[row.dataset.statRow]);
+    });
+  }
+  document.querySelectorAll('.stat-toggle').forEach(cb => {
+    cb.checked = !!statVisibility[cb.dataset.stat];
+    cb.addEventListener('change', () => {
+      statVisibility[cb.dataset.stat] = cb.checked;
+      saveStatVisibility();
+      applyStatVisibility();
+    });
+  });
+  applyStatVisibility();
+  // drag/minimize wiring for winStatConfig lives further down, alongside the other
+  // window-manager setup (makeDraggable etc. aren't ready to use this early)
 
   // ---------- force preview window ----------
   const winForceEl = document.getElementById('winForce');
@@ -906,6 +1108,7 @@
     render();
     updateInfoPanelIfOpen();
     updateStats();
+    updateZoomIndicator();
     renderForcePreview();
     renderForceGraph();
     requestAnimationFrame(loop);
@@ -1033,17 +1236,111 @@
     });
   }
 
+  function flashBtn(btn, symbol) {
+    const original = btn.textContent;
+    btn.textContent = symbol;
+    setTimeout(() => { btn.textContent = original; }, 1200);
+  }
+
   const copyVarsBtn = document.getElementById('copyVarsBtn');
   copyVarsBtn.addEventListener('click', () => {
     const text = variables.map(v => v.name + ': ' + v.expr).join('\n');
-    const original = copyVarsBtn.textContent;
     copyTextToClipboard(text).then(() => {
-      copyVarsBtn.textContent = '✓ Skopiowano';
+      flashBtn(copyVarsBtn, '✓');
     }).catch(() => {
-      copyVarsBtn.textContent = '✕ Nie udało się skopiować';
-    }).finally(() => {
-      setTimeout(() => { copyVarsBtn.textContent = original; }, 1400);
+      flashBtn(copyVarsBtn, '✕');
     });
+  });
+
+  // ---------- export / import variables as CSV (role,name,expr) ----------
+  function csvField(v) {
+    return '"' + String(v).replace(/"/g, '""') + '"';
+  }
+
+  const exportVarsBtn = document.getElementById('exportVarsBtn');
+  exportVarsBtn.addEventListener('click', () => {
+    const rows = [['role', 'name', 'expr'], ...variables.map(v => [v.role || '', v.name, v.expr])];
+    const csv = rows.map(r => r.map(csvField).join(',')).join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'fotony-zmienne.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    flashBtn(exportVarsBtn, '✓');
+  });
+
+  // minimal RFC4180-ish parser: handles quoted fields with embedded commas/quotes/newlines
+  function parseCSV(text) {
+    const rows = [];
+    let row = [], field = '', inQuotes = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (inQuotes) {
+        if (c === '"') {
+          if (text[i + 1] === '"') { field += '"'; i++; }
+          else inQuotes = false;
+        } else field += c;
+      } else if (c === '"') {
+        inQuotes = true;
+      } else if (c === ',') {
+        row.push(field); field = '';
+      } else if (c === '\n' || c === '\r') {
+        if (c === '\r' && text[i + 1] === '\n') i++;
+        row.push(field); field = '';
+        rows.push(row); row = [];
+      } else {
+        field += c;
+      }
+    }
+    if (field !== '' || row.length) { row.push(field); rows.push(row); }
+    return rows.filter(r => r.length > 1 || r[0] !== '');
+  }
+
+  // validates a parsed CSV against the same rules as the editor (exactly one row per
+  // required role) and reports what's wrong instead of silently falling back, since
+  // the user is explicitly importing a specific file and expects it to either work or fail loudly.
+  function parseImportedVariables(rows) {
+    if (!rows.length) return { error: 'Pusty plik.' };
+    let dataRows = rows;
+    const header = rows[0].map(h => h.trim().toLowerCase());
+    if (header[0] === 'role' && header[1] === 'name' && header[2] === 'expr') dataRows = rows.slice(1);
+    const parsed = dataRows.map(r => ({
+      role: (r[0] || '').trim() || null,
+      name: (r[1] || '').trim(),
+      expr: (r[2] || '').trim()
+    })).filter(v => v.name);
+    for (const v of parsed) {
+      if (v.role && !REQUIRED_ROLES.includes(v.role)) return { error: `Nieznana rola "${v.role}" w wierszu "${v.name}".` };
+    }
+    for (const role of REQUIRED_ROLES) {
+      const count = parsed.filter(v => v.role === role).length;
+      if (count !== 1) return { error: `Wymagana dokładnie jedna zmienna o roli "${role}" (znaleziono ${count}).` };
+    }
+    return { vars: parsed };
+  }
+
+  const importVarsBtn = document.getElementById('importVarsBtn');
+  const importVarsInput = document.getElementById('importVarsInput');
+  importVarsBtn.addEventListener('click', () => importVarsInput.click());
+  importVarsInput.addEventListener('change', () => {
+    const file = importVarsInput.files[0];
+    importVarsInput.value = ''; // reset so importing the same file again still fires 'change'
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const { vars, error } = parseImportedVariables(parseCSV(String(reader.result)));
+      if (error) { alert('Nie udało się zaimportować CSV: ' + error); return; }
+      variables = vars;
+      saveSettings();
+      renderEditorRows();
+      flashBtn(importVarsBtn, '✓');
+    };
+    reader.onerror = () => alert('Nie udało się odczytać pliku.');
+    reader.readAsText(file);
   });
 
   // ---------- selection state ----------
@@ -1060,7 +1357,7 @@
     infoTitle.textContent = 'Foton #' + p.id;
     const speed = Math.hypot(p.vx, p.vy);
     infoBody.innerHTML = `
-      <div class="row"><span class="k"><span class="swatch" style="background:${colorForCharge(p.charge,1)}"></span>Ładunek</span><span class="v">${p.charge.toFixed(2)}</span></div>
+      <div class="row"><span class="k"><span class="swatch" style="background:${photonColor(p,1)}"></span>Ładunek</span><span class="v">${p.charge.toFixed(2)}</span></div>
       <div class="row"><span class="k">Szybkość (aktualna)</span><span class="v">${speed.toFixed(1)} px/s</span></div>
       <div class="row"><span class="k">Szybkość (maks.)</span><span class="v">${p.maxSpeed.toFixed(1)} px/s</span></div>
       <div class="row"><span class="k">Masa</span><span class="v">${p.mass.toFixed(2)}</span></div>
@@ -1088,6 +1385,19 @@
     removeDynamicDockIcon('info');
   }
 
+  // removes photons from the simulation outright (not just from the selection) —
+  // used by the per-row ✕ in the list window and by the Delete key
+  function removePhotonsByIds(ids) {
+    const idSet = ids instanceof Set ? ids : new Set(ids);
+    if (idSet.size === 0) return;
+    photons = photons.filter(p => !idSet.has(p.id));
+    if (selectedId != null && idSet.has(selectedId)) {
+      selectedId = null;
+      minimizeWin(winInfo, null);
+      removeDynamicDockIcon('info');
+    }
+  }
+
   // ---------- list window (rectangle selection result) ----------
   const winList = document.getElementById('winList');
   const listBody = document.getElementById('listBody');
@@ -1100,8 +1410,14 @@
       if (!p) continue;
       const tr = document.createElement('tr');
       tr.className = 'pick';
-      tr.innerHTML = `<td><span class="swatch" style="background:${colorForCharge(p.charge,1)}"></span>${p.id}</td><td>${p.charge.toFixed(2)}</td><td>${p.maxSpeed.toFixed(0)} px/s</td>`;
+      tr.innerHTML = `<td><span class="swatch" style="background:${photonColor(p,1)}"></span>${p.id}</td><td>${p.charge.toFixed(2)}</td><td>${p.maxSpeed.toFixed(0)} px/s</td><td><button class="var-del row-del" title="Usuń foton z symulacji">✕</button></td>`;
       tr.addEventListener('click', () => selectPhoton(p.id));
+      tr.querySelector('.row-del').addEventListener('click', (e) => {
+        e.stopPropagation(); // don't also trigger the row's own click (select) handler
+        removePhotonsByIds([p.id]);
+        listSelection.delete(p.id);
+        showListPanel(Array.from(listSelection));
+      });
       listBody.appendChild(tr);
     }
     if (ids.length) {
@@ -1112,7 +1428,43 @@
     }
   }
 
-  // ---------- window manager: drag + minimize-to-dock ----------
+  // ---------- window manager: drag + resize + minimize-to-dock, all persisted ----------
+  // keyed by element id, so it covers every .window (persistent and contextual) the
+  // same way — position/size are always remembered; "minimized" is only re-applied
+  // on load for the persistent windows (see below), since the contextual ones
+  // (info/list) are driven by selection state and have nothing to show on a fresh load.
+  const WIN_LS_KEY = 'photonSim.windows.v1';
+  function loadWindowState() {
+    try {
+      const raw = localStorage.getItem(WIN_LS_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch (e) { return {}; }
+  }
+  const windowState = loadWindowState();
+  function saveWindowState() {
+    try { localStorage.setItem(WIN_LS_KEY, JSON.stringify(windowState)); } catch (e) { /* ignore */ }
+  }
+  function persistRect(win) {
+    if (win.classList.contains('minimized')) return; // display:none -> zero rect
+    const rect = win.getBoundingClientRect();
+    windowState[win.id] = Object.assign({}, windowState[win.id], {
+      left: rect.left, top: rect.top, width: rect.width, height: rect.height
+    });
+    saveWindowState();
+  }
+  function persistMinimized(win, minimized) {
+    windowState[win.id] = Object.assign({}, windowState[win.id], { minimized });
+    saveWindowState();
+  }
+  function applySavedRect(win) {
+    const s = windowState[win.id];
+    if (!s) return;
+    if (typeof s.left === 'number') { win.style.left = s.left + 'px'; win.style.right = 'auto'; }
+    if (typeof s.top === 'number') { win.style.top = s.top + 'px'; win.style.bottom = 'auto'; }
+    if (typeof s.width === 'number') win.style.width = s.width + 'px';
+    if (typeof s.height === 'number') win.style.height = s.height + 'px';
+  }
+
   function makeDraggable(win) {
     const header = win.querySelector('.window-header');
     let dragging = false, offX = 0, offY = 0;
@@ -1122,6 +1474,7 @@
       win.style.left = rect.left + 'px';
       win.style.top = rect.top + 'px';
       win.style.right = 'auto';
+      win.style.bottom = 'auto';
       offX = e.clientX - rect.left;
       offY = e.clientY - rect.top;
       dragging = true;
@@ -1136,16 +1489,31 @@
       win.style.left = nx + 'px';
       win.style.top = ny + 'px';
     });
-    window.addEventListener('mouseup', () => { dragging = false; });
+    window.addEventListener('mouseup', () => {
+      if (dragging) { dragging = false; persistRect(win); }
+    });
+
+    // catches the native corner-drag resize (CSS `resize: both` on .window)
+    if (window.ResizeObserver) {
+      let resizeTimer = null;
+      new ResizeObserver(() => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => persistRect(win), 150);
+      }).observe(win);
+    }
+
+    applySavedRect(win);
   }
 
   function minimizeWin(win, dockBtn) {
     win.classList.add('minimized');
     if (dockBtn) dockBtn.classList.remove('active');
+    persistMinimized(win, true);
   }
   function restoreWin(win, dockBtn) {
     win.classList.remove('minimized');
     if (dockBtn) dockBtn.classList.add('active');
+    persistMinimized(win, false);
   }
   function toggleWin(win, dockBtn) {
     if (win.classList.contains('minimized')) restoreWin(win, dockBtn);
@@ -1176,11 +1544,17 @@
   const dockForce = document.getElementById('dockForce');
   const winForceGraph = document.getElementById('winForceGraph');
   const dockForceGraph = document.getElementById('dockForceGraph');
+  const winFilter = document.getElementById('winFilter');
+  const dockFilter = document.getElementById('dockFilter');
 
-  [ [winStats, dockStats], [winEditor, dockEditor], [winForce, dockForce], [winForceGraph, dockForceGraph] ].forEach(([win, dockBtn]) => {
+  [ [winStats, dockStats], [winEditor, dockEditor], [winForce, dockForce], [winForceGraph, dockForceGraph], [winFilter, dockFilter] ].forEach(([win, dockBtn]) => {
     makeDraggable(win);
     win.querySelector('.win-min').addEventListener('click', () => minimizeWin(win, dockBtn));
     dockBtn.addEventListener('click', () => toggleWin(win, dockBtn));
+    // restore last minimized/open state — only for these persistent windows, since
+    // info/list are driven by selection and start empty on a fresh load anyway
+    const saved = windowState[win.id];
+    if (saved && saved.minimized) minimizeWin(win, dockBtn);
   });
 
   // contextual windows: info / list — dock icon only appears while minimized
@@ -1206,11 +1580,31 @@
     removeDynamicDockIcon('list');
   });
 
+  // stats settings window: opened via the gear icon in winStats' header
+  const statConfigBtn = document.getElementById('statConfigBtn');
+  const winStatConfig = document.getElementById('winStatConfig');
+  makeDraggable(winStatConfig);
+  statConfigBtn.addEventListener('click', () => toggleWin(winStatConfig, null));
+  winStatConfig.querySelector('.win-min').addEventListener('click', () => minimizeWin(winStatConfig, null));
+  winStatConfig.querySelector('.win-close').addEventListener('click', () => minimizeWin(winStatConfig, null));
+
+  // ---------- clear data: wipes saved editor formulas + window layout ----------
+  const clearDataBtn = document.getElementById('clearDataBtn');
+  clearDataBtn.addEventListener('click', () => {
+    if (!confirm('Usunąć zapisane dane (formuły edytora, rozmiar/pozycję okienek oraz ustawienia statystyk) i przywrócić ustawienia domyślne?')) return;
+    try {
+      localStorage.removeItem(LS_KEY);
+      localStorage.removeItem(WIN_LS_KEY);
+      localStorage.removeItem(STATS_LS_KEY);
+    } catch (e) { /* ignore (e.g. storage disabled) */ }
+    location.reload();
+  });
+
   // ---------- brush tools: zaznaczanie / przyciąganie / spawn ----------
   let currentTool = 'select';   // 'select' | 'attract' | 'spawn'
   let attractCharge = 'all';    // 'all' | 'pos' | 'neg'
 
-  const toolButtons = document.querySelectorAll('.tool-btn');
+  const toolButtons = document.querySelectorAll('#toolGroup .tool-btn');
   const chargeGroup = document.getElementById('chargeGroup');
   const chargeButtons = document.querySelectorAll('.charge-btn');
   const hintEl = document.getElementById('hint');
@@ -1242,6 +1636,13 @@
   }));
   updateHint();
 
+  // ---------- color filter (winFilter): default fixed scale vs. intensity-by-charge ----------
+  const colorModeButtons = document.querySelectorAll('#colorModeGroup .tool-btn');
+  colorModeButtons.forEach(b => b.addEventListener('click', () => {
+    colorMode = b.dataset.colorMode;
+    colorModeButtons.forEach(x => x.classList.toggle('active', x === b));
+  }));
+
   // ---------- spawning (used by the "spawn" brush) ----------
   function spawnPhotonAt(x, y) {
     if (photons.length >= MAX_PHOTONS) return;
@@ -1265,9 +1666,22 @@
     return { x, y, w, h };
   }
 
+  // mouse-wheel zoom, anchored on the cursor (the world point under it stays put)
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const factor = Math.exp(-e.deltaY * 0.0015);
+    const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom * factor));
+    if (newZoom === zoom) return;
+    const wx = e.clientX / zoom + camX, wy = e.clientY / zoom + camY;
+    zoom = newZoom;
+    camX = wx - e.clientX / zoom;
+    camY = wy - e.clientY / zoom;
+  }, { passive: false });
+
   canvas.addEventListener('mousedown', (e) => {
     dragging = true; rectActive = false; mouseDown = true;
-    startX = curX = e.clientX; startY = curY = e.clientY;
+    const w = screenToWorld(e.clientX, e.clientY);
+    startX = curX = w.x; startY = curY = w.y;
 
     if (currentTool === 'spawn') {
       spawnPhotonAt(curX, curY);
@@ -1276,7 +1690,8 @@
   });
 
   window.addEventListener('mousemove', (e) => {
-    curX = e.clientX; curY = e.clientY;
+    const w = screenToWorld(e.clientX, e.clientY);
+    curX = w.x; curY = w.y;
 
     if (dragging && currentTool === 'select' && !rectActive && Math.hypot(curX - startX, curY - startY) > DRAG_THRESHOLD) {
       rectActive = true;
@@ -1315,6 +1730,18 @@
       }
     }
     rectActive = false;
+  });
+
+  // Delete key: removes every photon currently in the "Zaznaczone fotony" list from
+  // the simulation. Ignored while typing in an input/textarea (e.g. editor fields).
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'Delete') return;
+    const tag = document.activeElement && document.activeElement.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    if (listSelection.size === 0) return;
+    removePhotonsByIds(listSelection);
+    listSelection.clear();
+    showListPanel([]);
   });
 })();
 </script>
