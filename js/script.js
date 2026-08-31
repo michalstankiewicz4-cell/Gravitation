@@ -316,6 +316,19 @@
   // so without this nothing would stop two photons from landing on the same point.
   const HARD_CORE_R = 1;
   const HARD_CORE_K = 4000;
+
+  // force model: 'classic' keeps the raw sine, which alternates sign every half
+  // period — so even same-charge pairs attract in some distance bands, since
+  // phaseSign only flips which half of the wave is which. 'no-attract-same' takes
+  // the absolute value of the wave instead: intensity still varies with distance,
+  // but the sign (attract vs repel) never flips, so like charges always repel and
+  // opposite charges always attract. Shared by step(), the reactor, and both force
+  // previews, so switching it in the editor affects everything consistently.
+  let forceProfile = 'classic'; // 'classic' | 'no-attract-same'
+  function waveTerm(d, range, periods) {
+    const raw = Math.sin(2 * Math.PI * periods * d / range);
+    return forceProfile === 'no-attract-same' ? Math.abs(raw) : raw;
+  }
   const BRUSH_RADIUS = 160;    // reach of the "przyciąganie" brush
   const BRUSH_STRENGTH = 2600; // pull strength of the "przyciąganie" brush
 
@@ -406,7 +419,7 @@
             const chargeProduct = a.charge * b.charge;
             const phaseSign = chargeProduct < 0 ? 1 : -1;
             const envelope = 1 - d / range; // fades to 0 at the outer edge, no hard jump
-            f = phaseSign * amp * Math.sin(2 * Math.PI * periodsAvg * d / range) * envelope;
+            f = phaseSign * amp * waveTerm(d, range, periodsAvg) * envelope;
           }
 
           const fx = ux * f, fy = uy * f;
@@ -619,7 +632,7 @@
         stopColor = 'rgba(255,80,80,0.9)';
       } else {
         const envelope = 1 - d / range;
-        const raw = Math.sin(2 * Math.PI * periods * d / range) * envelope;
+        const raw = waveTerm(d, range, periods) * envelope;
         const alpha = Math.min(1, Math.abs(raw)) * 0.8;
         stopColor = raw >= 0
           ? baseColor.replace(/,[^,]*\)$/, ',' + alpha.toFixed(3) + ')')
@@ -685,7 +698,7 @@
     if (d >= range) return 0;
     const phaseSign = chargeProduct < 0 ? 1 : -1;
     const envelope = 1 - d / range;
-    return phaseSign * amp * Math.sin(2 * Math.PI * periodsAvg * d / range) * envelope;
+    return phaseSign * amp * waveTerm(d, range, periodsAvg) * envelope;
   }
 
   function renderForceGraph() {
@@ -1023,6 +1036,10 @@
     reader.readAsText(file);
   });
 
+  const forceProfileSelect = document.getElementById('forceProfileSelect');
+  forceProfileSelect.value = forceProfile;
+  forceProfileSelect.addEventListener('change', () => { forceProfile = forceProfileSelect.value; });
+
   // ---------- selection state ----------
   // one independent floating window per selected photon, so picking a new one from
   // the list doesn't close whichever ones are already open — keyed by photon id.
@@ -1300,7 +1317,7 @@
           const periodsAvg = (a.periods + b.periods) / 2;
           const phaseSign = a.charge * b.charge < 0 ? 1 : -1;
           const envelope = 1 - d / range;
-          f = phaseSign * amp * Math.sin(2 * Math.PI * periodsAvg * d / range) * envelope;
+          f = phaseSign * amp * waveTerm(d, range, periodsAvg) * envelope;
         }
         const fx = ux * f, fy = uy * f;
         ax[i] += fx; ay[i] += fy;
