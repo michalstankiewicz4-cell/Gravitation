@@ -1378,12 +1378,6 @@
     toolButtons.forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
     chargeGroup.classList.toggle('hidden', tool !== 'attract');
     dragging = false; rectActive = false; mouseDown = false;
-    if (tool === 'select') {
-      // rectangle-select doesn't account for the toroidal world wrap, so a selection
-      // dragged across the seam that becomes visible when zoomed/panned would pick a
-      // wildly wrong area — resetting to the default view sidesteps that entirely
-      zoom = 1; camX = 0; camY = 0;
-    }
     updateHint();
   }
   toolButtons.forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
