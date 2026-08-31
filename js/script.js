@@ -1040,9 +1040,17 @@
     removeDynamicDockIcon('info-' + id);
     delete windowState['winInfo-' + id];
     saveWindowState();
+    if (listSelection.delete(id)) {
+      if (listSelection.size === 0) minimizeWin(winList, null);
+      renderListBody();
+    }
   }
 
   function openInfoWindow(p) {
+    // also highlight it in the "Zaznaczone fotony" list (renders live if that
+    // window happens to be open; doesn't force it open otherwise)
+    if (!listSelection.has(p.id)) { listSelection.add(p.id); renderListBody(); }
+
     let w = openInfoWindows.get(p.id);
     if (w) {
       restoreWin(w.el, null);
