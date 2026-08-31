@@ -126,16 +126,27 @@
   // expensive) `new Function` compile cost once per edit, not once per photon.
   function compileVariables(vars) {
     const namesSoFar = [];
+    const usedNames = new Set(HELPER_NAMES); // reserved: colliding with a helper is also a naming conflict
     return vars.map((row, i) => {
-      const safeName = sanitizeIdentifier(row.name) || ('v' + i);
+      let safeName = sanitizeIdentifier(row.name) || ('v' + i);
       let fn = null, compileError = null;
-      try {
-        fn = new Function(...namesSoFar, ...HELPER_NAMES,
-          '"use strict"; const v = (' + row.expr + '); ' +
-          'if (typeof v !== "number" || !isFinite(v)) throw new Error("wynik nie jest liczbą"); return v;');
-      } catch (e) {
-        compileError = e.message || 'błąd składni';
+      if (usedNames.has(safeName)) {
+        // new Function() would throw "Duplicate parameter name" here, which would
+        // also poison every row below it (they'd all inherit the clashing name via
+        // namesSoFar). Instead: flag only this row, and rename it internally so
+        // later rows keep compiling — the earlier row keeps the name for real use.
+        compileError = `nazwa "${row.name}" jest już zajęta przez inną zmienną (lub to nazwa funkcji: ${HELPER_NAMES.join(', ')})`;
+        safeName = safeName + '_' + i;
+      } else {
+        try {
+          fn = new Function(...namesSoFar, ...HELPER_NAMES,
+            '"use strict"; const v = (' + row.expr + '); ' +
+            'if (typeof v !== "number" || !isFinite(v)) throw new Error("wynik nie jest liczbą"); return v;');
+        } catch (e) {
+          compileError = e.message || 'błąd składni';
+        }
       }
+      usedNames.add(safeName);
       const compiled = { row, safeName, fn, compileError, argNames: namesSoFar.slice() };
       namesSoFar.push(safeName);
       return compiled;
@@ -218,9 +229,9 @@
   let photons = [];
 
   // Live-updates every existing photon when the editor changes: each photon keeps
-  // its own charge/mass (its "identity"), everything derived from them (speed cap,
-  // ranges, forces) is recomputed with the current formulas. Compiling once and
-  // reusing across all photons keeps this fast even at a few thousand photons.
+  // its own charge/mass/energy (its "identity"), everything else derived from them
+  // (speed cap, ranges, forces) is recomputed with the current formulas. Compiling
+  // once and reusing across all photons keeps this fast even at a few thousand photons.
   function refreshAllPhotons() {
     if (photons.length === 0) return;
     for (const p of photons) {
@@ -230,7 +241,6 @@
       p.force = clampNum(results.force, 0, 1000000, p.force);
       p.forceRange = clampNum(results.forceRange, 5, 4000, p.forceRange);
       p.periods = clampNum(results.periods, -50, 50, p.periods);
-      if (p.forceRange > maxRangeSeen) maxRangeSeen = p.forceRange;
     }
   }
 
@@ -309,12 +319,6 @@
   const BRUSH_RADIUS = 160;    // reach of the "przyciąganie" brush
   const BRUSH_STRENGTH = 2600; // pull strength of the "przyciąganie" brush
 
-  // spatial grid cell size must stay >= the largest forceRange in play, or the
-  // 3x3-neighborhood search below could miss valid interactions. Since the photon
-  // editor can produce arbitrary ranges via formulas, track the largest one seen
-  // (updated in spawnPhotonAt) and size the grid from that instead of a fixed constant.
-  let maxRangeSeen = 300;
-
   let collisionCount = 0;
   let activeCollisionPairs = new Set();
 
@@ -324,7 +328,13 @@
     const ax = new Float64Array(n), ay = new Float64Array(n);
 
     // ---- spatial grid (keeps pairwise checks near O(n) instead of O(n^2)) ----
-    const GRID_CELL = Math.max(100, maxRangeSeen + 20);
+    // cell size must stay >= the largest forceRange in play, or the 3x3-neighborhood
+    // search below could miss valid interactions. Recomputed fresh every step (not
+    // ratcheted up-only) so the grid shrinks back down after a wide-range photon is
+    // removed or its formula is edited down, instead of staying oversized all session.
+    let maxRange = 0;
+    for (let i = 0; i < n; i++) if (photons[i].forceRange > maxRange) maxRange = photons[i].forceRange;
+    const GRID_CELL = Math.max(100, maxRange + 20);
     const cols = Math.max(1, Math.floor(W / GRID_CELL));
     const rows = Math.max(1, Math.floor(H / GRID_CELL));
     const cellW = W / cols, cellH = H / rows;
@@ -361,7 +371,12 @@
           let dx = wrapDelta(b.x - a.x, W);
           let dy = wrapDelta(b.y - a.y, H);
           let d = Math.sqrt(dx * dx + dy * dy);
-          if (d < 0.01) { dx = (Math.random() - 0.5) * 0.1; dy = (Math.random() - 0.5) * 0.1; d = 0.1; }
+          if (d < 0.01) {
+            // random direction, but dx/dy must actually have length d for ux/uy below to stay a unit vector
+            const ang = Math.random() * Math.PI * 2;
+            d = 0.1;
+            dx = Math.cos(ang) * d; dy = Math.sin(ang) * d;
+          }
 
           // real collision: the two photon circles actually overlap
           if (d < a.radius + b.radius) {
@@ -1321,6 +1336,10 @@
   statConfigBtn.addEventListener('click', () => toggleWin(winStatConfig, null));
   winStatConfig.querySelector('.win-min').addEventListener('click', () => minimizeWin(winStatConfig, null));
   winStatConfig.querySelector('.win-close').addEventListener('click', () => minimizeWin(winStatConfig, null));
+  // restore last open/minimized state, same as the other persistent windows
+  // (default HTML state is already minimized, so only the "was open" case needs handling)
+  const savedStatConfig = windowState[winStatConfig.id];
+  if (savedStatConfig && savedStatConfig.minimized === false) restoreWin(winStatConfig, null);
 
   // ---------- clear data: wipes saved editor formulas + window layout ----------
   const clearDataBtn = document.getElementById('clearDataBtn');
@@ -1359,6 +1378,12 @@
     toolButtons.forEach(b => b.classList.toggle('active', b.dataset.tool === tool));
     chargeGroup.classList.toggle('hidden', tool !== 'attract');
     dragging = false; rectActive = false; mouseDown = false;
+    if (tool === 'select') {
+      // rectangle-select doesn't account for the toroidal world wrap, so a selection
+      // dragged across the seam that becomes visible when zoomed/panned would pick a
+      // wildly wrong area — resetting to the default view sidesteps that entirely
+      zoom = 1; camX = 0; camY = 0;
+    }
     updateHint();
   }
   toolButtons.forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
@@ -1385,7 +1410,6 @@
     p.x = wrap(x + rand(-8, 8), W);
     p.y = wrap(y + rand(-8, 8), H);
     photons.push(p);
-    if (p.forceRange > maxRangeSeen) maxRangeSeen = p.forceRange;
   }
 
   // ---------- mouse interaction ----------
