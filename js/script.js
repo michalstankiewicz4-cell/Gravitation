@@ -57,7 +57,7 @@
   updateZoomIndicator();
 
   // ---------- persisted settings: photon editor variables + rules ----------
-  const LS_KEY = 'photonSim.settings.v8'; // v8: added the waveOffset role
+  const LS_KEY = 'photonSim.settings.v9'; // v9: new default formulas
   // each row: { role, name, expr }. Rows with a "role" feed directly into the photon
   // (charge / mass / maxSpeed / energy / force / forceRange / periods) — exactly one
   // row per required role, and role never changes. Rows with role:null are helper/
@@ -76,13 +76,13 @@
     { role: 'charge', name: 'charge', expr: 'rand(-1, 1)' },
     { role: 'mass',   name: 'mass',   expr: 'rand(0.5, 3)' },
     { role: 'speed',  name: 'speed',  expr: '100 / mass' },
-    { role: 'energy', name: 'energy', expr: '10.5' },
+    { role: 'energy', name: 'energy', expr: '9' },
     { role: 'force',  name: 'force',  expr: 'abs(charge) * 5000' },
-    { role: 'forceRange', name: 'forceRange', expr: '100 + abs(charge) * 100' },
-    { role: 'periods', name: 'periods', expr: 'energy / 4' },
+    { role: 'forceRange', name: 'forceRange', expr: 'abs(charge) * 50' },
+    { role: 'periods', name: 'periods', expr: 'energy / 3' },
     // shifts the pairwise force wave up before it's rescaled back (see waveTerm()):
     // 0 = classic wave (can attract same charge in some shells), 1 = never flips sign
-    { role: 'waveOffset', name: 'waveOffset', expr: '0' }
+    { role: 'waveOffset', name: 'waveOffset', expr: '1' }
   ];
   const ROLE_FALLBACK = { charge: 0, mass: 1, speed: 50, energy: 10, force: 1000, forceRange: 100, periods: 2, waveOffset: 0 };
 
