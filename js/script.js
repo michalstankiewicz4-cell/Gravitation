@@ -335,6 +335,24 @@
     const raw = Math.sin(2 * Math.PI * periods * d / range);
     return (raw + offset) / (1 + offset);
   }
+
+  // single source of truth for the pairwise force — used by step(), the reactor,
+  // and both force-preview panels, so a fix here applies everywhere at once.
+  // The hard-core repulsion is ADDED on top of the wave (not swapped in as a
+  // separate branch), and fades to exactly 0 at d = HARD_CORE_R, so there's no
+  // jump at that boundary even when HARD_CORE_R is a large fraction of a very
+  // small forceRange (previously the two branches didn't agree at the seam).
+  function pairForce(d, range, amp, periodsAvg, offsetAvg, chargeProduct) {
+    if (d >= range) return 0;
+    const phaseSign = chargeProduct < 0 ? 1 : -1;
+    const envelope = 1 - d / range; // fades to 0 at the outer edge, no hard jump
+    let f = phaseSign * amp * waveTerm(d, range, periodsAvg, offsetAvg) * envelope;
+    if (d < HARD_CORE_R) {
+      const falloff = 1 - d / HARD_CORE_R;
+      f += -HARD_CORE_K * falloff / (d + 2);
+    }
+    return f;
+  }
   const BRUSH_RADIUS = 160;    // reach of the "przyciąganie" brush
   const BRUSH_STRENGTH = 2600; // pull strength of the "przyciąganie" brush
 
@@ -407,27 +425,18 @@
           if (d >= range) continue;
 
           const ux = dx / d, uy = dy / d;
-          let f = 0; // positive f = attract (pulls a toward b), negative = repel
-
-          if (d < HARD_CORE_R) {
-            // fixed safety net near d=0 — the sine itself gives zero force there
-            const falloff = 1 - d / HARD_CORE_R;
-            f = -HARD_CORE_K * falloff / (d + 2);
-          } else {
-            // one continuous wave out to "range": force amplitude, wave count
-            // ("periods") and the range itself all come from the two photons' own
-            // formulas. Same-charge pairs get the wave inverted (phaseSign), which
-            // is the same as shifting it by half a period — so at any given ring,
-            // opposite charges pull together while same charges push apart, and
-            // that flips again at the next ring, and so on.
-            const amp = (a.force + b.force) / 2;
-            const periodsAvg = (a.periods + b.periods) / 2;
-            const offsetAvg = (a.waveOffset + b.waveOffset) / 2;
-            const chargeProduct = a.charge * b.charge;
-            const phaseSign = chargeProduct < 0 ? 1 : -1;
-            const envelope = 1 - d / range; // fades to 0 at the outer edge, no hard jump
-            f = phaseSign * amp * waveTerm(d, range, periodsAvg, offsetAvg) * envelope;
-          }
+          // one continuous wave out to "range" (force amplitude, wave count
+          // "periods", and the range itself all come from the two photons' own
+          // formulas) plus a hard-core repulsion near d=0 — see pairForce(). Same-
+          // charge pairs get the wave inverted (phaseSign), which is the same as
+          // shifting it by half a period — so at any given ring, opposite charges
+          // pull together while same charges push apart, and that flips again at
+          // the next ring, and so on.
+          const amp = (a.force + b.force) / 2;
+          const periodsAvg = (a.periods + b.periods) / 2;
+          const offsetAvg = (a.waveOffset + b.waveOffset) / 2;
+          const chargeProduct = a.charge * b.charge;
+          const f = pairForce(d, range, amp, periodsAvg, offsetAvg, chargeProduct); // + = attract, - = repel
 
           const fx = ux * f, fy = uy * f;
           ax[i] += fx; ay[i] += fy;
@@ -635,17 +644,14 @@
     for (let i = 0; i <= STEPS; i++) {
       const t = i / STEPS;
       const d = t * range;
-      let stopColor;
-      if (d < HARD_CORE_R) {
-        stopColor = 'rgba(255,80,80,0.9)';
-      } else {
-        const envelope = 1 - d / range;
-        const raw = waveTerm(d, range, periods, offset) * envelope;
-        const alpha = Math.min(1, Math.abs(raw)) * 0.8;
-        stopColor = raw >= 0
-          ? baseColor.replace(/,[^,]*\)$/, ',' + alpha.toFixed(3) + ')')
-          : 'rgba(255,80,80,' + alpha.toFixed(3) + ')';
-      }
+      // chargeProduct=-1 ("opposite charge"): raw>0 means attract (shown in baseColor),
+      // raw<0 means repel (shown red) — includes the hard-core term so the ring
+      // colors transition smoothly through d=HARD_CORE_R instead of snapping
+      const raw = pairForce(d, range, amp, periods, offset, -1) / amp;
+      const alpha = Math.min(1, Math.abs(raw)) * 0.8;
+      const stopColor = raw >= 0
+        ? baseColor.replace(/,[^,]*\)$/, ',' + alpha.toFixed(3) + ')')
+        : 'rgba(255,80,80,' + alpha.toFixed(3) + ')';
       grad.addColorStop(t, stopColor);
     }
     fctx.fillStyle = grad;
@@ -696,18 +702,6 @@
   const forceGraphCanvas = document.getElementById('forceGraphCanvas');
   const gctx = forceGraphCanvas.getContext('2d');
 
-  // same force law as step()'s pairwise loop, evaluated for a single pair so it
-  // can be plotted as a curve instead of applied to real photons.
-  function sinForceAt(d, range, amp, periodsAvg, chargeProduct, offsetAvg) {
-    if (d < HARD_CORE_R) {
-      const falloff = 1 - d / HARD_CORE_R;
-      return -HARD_CORE_K * falloff / (d + 2);
-    }
-    if (d >= range) return 0;
-    const phaseSign = chargeProduct < 0 ? 1 : -1;
-    const envelope = 1 - d / range;
-    return phaseSign * amp * waveTerm(d, range, periodsAvg, offsetAvg) * envelope;
-  }
 
   function renderForceGraph() {
     if (winForceGraphEl.classList.contains('minimized')) return;
@@ -758,7 +752,7 @@
       const STEPS = 200;
       for (let i = 0; i <= STEPS; i++) {
         const d = (i / STEPS) * range;
-        const f = Math.max(-maxAmp, Math.min(maxAmp, sinForceAt(d, range, amp, periodsAvg, chargeProduct, offsetAvg)));
+        const f = Math.max(-maxAmp, Math.min(maxAmp, pairForce(d, range, amp, periodsAvg, offsetAvg, chargeProduct)));
         const x = xForD(d), y = yForF(f);
         if (i === 0) gctx.moveTo(x, y); else gctx.lineTo(x, y);
       }
@@ -1314,18 +1308,11 @@
         const range = (a.forceRange + b.forceRange) / 2;
         if (d >= range) continue;
         const ux = dx / d, uy = dy / d;
-        let f;
-        if (d < HARD_CORE_R) {
-          const falloff = 1 - d / HARD_CORE_R;
-          f = -HARD_CORE_K * falloff / (d + 2);
-        } else {
-          const amp = (a.force + b.force) / 2;
-          const periodsAvg = (a.periods + b.periods) / 2;
-          const offsetAvg = (a.waveOffset + b.waveOffset) / 2;
-          const phaseSign = a.charge * b.charge < 0 ? 1 : -1;
-          const envelope = 1 - d / range;
-          f = phaseSign * amp * waveTerm(d, range, periodsAvg, offsetAvg) * envelope;
-        }
+        const amp = (a.force + b.force) / 2;
+        const periodsAvg = (a.periods + b.periods) / 2;
+        const offsetAvg = (a.waveOffset + b.waveOffset) / 2;
+        const chargeProduct = a.charge * b.charge;
+        const f = pairForce(d, range, amp, periodsAvg, offsetAvg, chargeProduct);
         const fx = ux * f, fy = uy * f;
         ax[i] += fx; ay[i] += fy;
         ax[j] -= fx; ay[j] -= fy;
