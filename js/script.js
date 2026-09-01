@@ -138,15 +138,15 @@
         // also poison every row below it (they'd all inherit the clashing name via
         // namesSoFar). Instead: flag only this row, and rename it internally so
         // later rows keep compiling — the earlier row keeps the name for real use.
-        compileError = `nazwa "${row.name}" jest już zajęta przez inną zmienną (lub to nazwa funkcji: ${HELPER_NAMES.join(', ')})`;
+        compileError = `name "${row.name}" is already taken by another variable (or it's a function name: ${HELPER_NAMES.join(', ')})`;
         safeName = safeName + '_' + i;
       } else {
         try {
           fn = new Function(...namesSoFar, ...HELPER_NAMES,
             '"use strict"; const v = (' + row.expr + '); ' +
-            'if (typeof v !== "number" || !isFinite(v)) throw new Error("wynik nie jest liczbą"); return v;');
+            'if (typeof v !== "number" || !isFinite(v)) throw new Error("result is not a number"); return v;');
         } catch (e) {
-          compileError = e.message || 'błąd składni';
+          compileError = e.message || 'syntax error';
         }
       }
       usedNames.add(safeName);
@@ -174,7 +174,7 @@
           value = fn(...argNames.map(n => scope[n]), ...HELPER_FNS);
         } catch (e) {
           value = row.role ? ROLE_FALLBACK[row.role] : 0;
-          error = e.message || 'błąd wyrażenia';
+          error = e.message || 'expression error';
         }
       } else {
         value = row.role ? ROLE_FALLBACK[row.role] : 0;
@@ -353,8 +353,8 @@
     }
     return f;
   }
-  const BRUSH_RADIUS = 160;    // reach of the "przyciąganie" brush
-  const BRUSH_STRENGTH = 2600; // pull strength of the "przyciąganie" brush
+  const BRUSH_RADIUS = 160;    // reach of the "attract" brush
+  const BRUSH_STRENGTH = 2600; // pull strength of the "attract" brush
 
   let collisionCount = 0;
   let activeCollisionPairs = new Set();
@@ -450,7 +450,7 @@
     }
     activeCollisionPairs = newCollisionPairs;
 
-    // "przyciąganie" brush: while held, pull matching-charge photons toward the cursor
+    // "attract" brush: while held, pull matching-charge photons toward the cursor
     if (currentTool === 'attract' && mouseDown) {
       for (let i = 0; i < n; i++) {
         const p = photons[i];
@@ -688,13 +688,13 @@
     fctx.fillStyle = '#c7cfe4';
     fctx.font = '11px sans-serif';
     fctx.textAlign = 'center';
-    fctx.fillText('ładunek +1', cxPos, h - 34);
-    fctx.fillText('zasięg ' + pos.forceRange.toFixed(0) + 'px  okresów ' + pos.periods.toFixed(2), cxPos, h - 20);
-    fctx.fillText('siła ' + pos.force.toFixed(0) + '  energia ' + pos.energy.toFixed(1), cxPos, h - 6);
+    fctx.fillText('charge +1', cxPos, h - 34);
+    fctx.fillText('range ' + pos.forceRange.toFixed(0) + 'px  periods ' + pos.periods.toFixed(2), cxPos, h - 20);
+    fctx.fillText('force ' + pos.force.toFixed(0) + '  energy ' + pos.energy.toFixed(1), cxPos, h - 6);
 
-    fctx.fillText('ładunek -1', cxNeg, h - 34);
-    fctx.fillText('zasięg ' + neg.forceRange.toFixed(0) + 'px  okresów ' + neg.periods.toFixed(2), cxNeg, h - 20);
-    fctx.fillText('siła ' + neg.force.toFixed(0) + '  energia ' + neg.energy.toFixed(1), cxNeg, h - 6);
+    fctx.fillText('charge -1', cxNeg, h - 34);
+    fctx.fillText('range ' + neg.forceRange.toFixed(0) + 'px  periods ' + neg.periods.toFixed(2), cxNeg, h - 20);
+    fctx.fillText('force ' + neg.force.toFixed(0) + '  energy ' + neg.energy.toFixed(1), cxNeg, h - 6);
   }
 
   // ---------- force graph window (horizontal: force vs distance) ----------
@@ -758,8 +758,8 @@
       }
       gctx.stroke();
     }
-    drawCurve(-1, '#5aa9ff');  // przeciwne ładunki
-    drawCurve(1, '#ff9f4a');   // ten sam ładunek
+    drawCurve(-1, '#5aa9ff');  // opposite charges
+    drawCurve(1, '#ff9f4a');   // same charge
 
     // axis labels
     gctx.fillStyle = '#c7cfe4';
@@ -769,26 +769,26 @@
     gctx.textAlign = 'right';
     gctx.fillText(range.toFixed(0) + 'px', w - padR, h - padB + 14);
     gctx.textAlign = 'center';
-    gctx.fillText('dystans', padL + plotW / 2, h - 6);
+    gctx.fillText('distance', padL + plotW / 2, h - 6);
     gctx.save();
     gctx.translate(12, padT + plotH / 2);
     gctx.rotate(-Math.PI / 2);
-    gctx.fillText('siła', 0, 0);
+    gctx.fillText('force', 0, 0);
     gctx.restore();
     gctx.textAlign = 'left';
-    gctx.fillText('przyciąga', padL + 2, padT + 10);
-    gctx.fillText('odpycha', padL + 2, h - padB - 4);
+    gctx.fillText('attracts', padL + 2, padT + 10);
+    gctx.fillText('repels', padL + 2, h - padB - 4);
 
     // legend
     gctx.fillStyle = '#5aa9ff';
     gctx.fillRect(w - 150, 6, 10, 10);
     gctx.fillStyle = '#c7cfe4';
     gctx.textAlign = 'left';
-    gctx.fillText('przeciwne', w - 136, 15);
+    gctx.fillText('opposite', w - 136, 15);
     gctx.fillStyle = '#ff9f4a';
     gctx.fillRect(w - 150, 20, 10, 10);
     gctx.fillStyle = '#c7cfe4';
-    gctx.fillText('ten sam', w - 136, 29);
+    gctx.fillText('same charge', w - 136, 29);
   }
 
   // ---------- run loop ----------
@@ -815,7 +815,7 @@
   const toggleBtn = document.getElementById('toggleBtn');
   toggleBtn.addEventListener('click', () => {
     paused = !paused;
-    toggleBtn.textContent = paused ? 'Start' : 'Pauza';
+    toggleBtn.textContent = paused ? 'Start' : 'Pause';
   });
 
   const speedInput = document.getElementById('speed');
@@ -869,19 +869,19 @@
       el.className = 'var-row';
       el.innerHTML = `
         <div class="var-order">
-          <button class="var-up" title="Przenieś wyżej">▲</button>
-          <button class="var-down" title="Przenieś niżej">▼</button>
+          <button class="var-up" title="Move up">▲</button>
+          <button class="var-down" title="Move down">▼</button>
         </div>
         <input type="text" class="var-name" spellcheck="false">
         <span>:</span>
         <input type="text" class="var-expr" spellcheck="false">
-        ${isCustom ? '<button class="var-del" title="Usuń zmienną pomocniczą">✕</button>' : ''}
+        ${isCustom ? '<button class="var-del" title="Delete helper variable">✕</button>' : ''}
       `;
       const nameInput = el.querySelector('.var-name');
       const exprInput = el.querySelector('.var-expr');
       nameInput.value = row.name;
       exprInput.value = row.expr;
-      if (!isCustom) nameInput.title = 'Wbudowana właściwość fotonu — nazwę można zmienić, wiersza nie można usunąć';
+      if (!isCustom) nameInput.title = "Built-in photon property — you can rename it, but the row can't be deleted";
       el.querySelector('.var-up').disabled = idx === 0;
       el.querySelector('.var-down').disabled = idx === variables.length - 1;
 
@@ -961,7 +961,7 @@
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'fotony-zmienne.csv';
+    a.download = 'photon-variables.csv';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -1000,7 +1000,7 @@
   // required role) and reports what's wrong instead of silently falling back, since
   // the user is explicitly importing a specific file and expects it to either work or fail loudly.
   function parseImportedVariables(rows) {
-    if (!rows.length) return { error: 'Pusty plik.' };
+    if (!rows.length) return { error: 'Empty file.' };
     let dataRows = rows;
     const header = rows[0].map(h => h.trim().toLowerCase());
     if (header[0] === 'role' && header[1] === 'name' && header[2] === 'expr') dataRows = rows.slice(1);
@@ -1010,11 +1010,11 @@
       expr: (r[2] || '').trim()
     })).filter(v => v.name);
     for (const v of parsed) {
-      if (v.role && !REQUIRED_ROLES.includes(v.role)) return { error: `Nieznana rola "${v.role}" w wierszu "${v.name}".` };
+      if (v.role && !REQUIRED_ROLES.includes(v.role)) return { error: `Unknown role "${v.role}" in row "${v.name}".` };
     }
     for (const role of REQUIRED_ROLES) {
       const count = parsed.filter(v => v.role === role).length;
-      if (count !== 1) return { error: `Wymagana dokładnie jedna zmienna o roli "${role}" (znaleziono ${count}).` };
+      if (count !== 1) return { error: `Exactly one variable with role "${role}" is required (found ${count}).` };
     }
     return { vars: parsed };
   }
@@ -1029,13 +1029,13 @@
     const reader = new FileReader();
     reader.onload = () => {
       const { vars, error } = parseImportedVariables(parseCSV(String(reader.result)));
-      if (error) { alert('Nie udało się zaimportować CSV: ' + error); return; }
+      if (error) { alert('Failed to import CSV: ' + error); return; }
       variables = vars;
       saveSettings();
       renderEditorRows();
       flashBtn(importVarsBtn, '✓');
     };
-    reader.onerror = () => alert('Nie udało się odczytać pliku.');
+    reader.onerror = () => alert('Failed to read the file.');
     reader.readAsText(file);
   });
 
@@ -1048,19 +1048,19 @@
   function findPhoton(id) { return photons.find(p => p.id === id); }
 
   function renderInfoPanel(p, w) {
-    w.titleEl.textContent = 'Foton #' + p.id;
+    w.titleEl.textContent = 'Photon #' + p.id;
     const speed = Math.hypot(p.vx, p.vy);
     w.bodyEl.innerHTML = `
-      <div class="row"><span class="k"><span class="swatch" style="background:${photonColor(p,1)}"></span>Ładunek</span><span class="v">${p.charge.toFixed(2)}</span></div>
-      <div class="row"><span class="k">Szybkość (aktualna)</span><span class="v">${speed.toFixed(1)} px/s</span></div>
-      <div class="row"><span class="k">Szybkość (maks.)</span><span class="v">${p.maxSpeed.toFixed(1)} px/s</span></div>
-      <div class="row"><span class="k">Masa</span><span class="v">${p.mass.toFixed(2)}</span></div>
-      <div class="row"><span class="k">Energia</span><span class="v">${p.energy.toFixed(2)}</span></div>
-      <div class="row"><span class="k">Amplituda siły</span><span class="v">${p.force.toFixed(0)}</span></div>
-      <div class="row"><span class="k">Zasięg siły</span><span class="v">${p.forceRange.toFixed(0)} px</span></div>
-      <div class="row"><span class="k">Liczba okresów</span><span class="v">${p.periods.toFixed(2)}</span></div>
-      <div class="row"><span class="k">Przesunięcie fali</span><span class="v">${p.waveOffset.toFixed(2)}</span></div>
-      <div class="row"><span class="k">Pozycja</span><span class="v">${p.x.toFixed(0)}, ${p.y.toFixed(0)}</span></div>
+      <div class="row"><span class="k"><span class="swatch" style="background:${photonColor(p,1)}"></span>Charge</span><span class="v">${p.charge.toFixed(2)}</span></div>
+      <div class="row"><span class="k">Speed (current)</span><span class="v">${speed.toFixed(1)} px/s</span></div>
+      <div class="row"><span class="k">Speed (max)</span><span class="v">${p.maxSpeed.toFixed(1)} px/s</span></div>
+      <div class="row"><span class="k">Mass</span><span class="v">${p.mass.toFixed(2)}</span></div>
+      <div class="row"><span class="k">Energy</span><span class="v">${p.energy.toFixed(2)}</span></div>
+      <div class="row"><span class="k">Force amplitude</span><span class="v">${p.force.toFixed(0)}</span></div>
+      <div class="row"><span class="k">Force range</span><span class="v">${p.forceRange.toFixed(0)} px</span></div>
+      <div class="row"><span class="k">Periods</span><span class="v">${p.periods.toFixed(2)}</span></div>
+      <div class="row"><span class="k">Wave offset</span><span class="v">${p.waveOffset.toFixed(2)}</span></div>
+      <div class="row"><span class="k">Position</span><span class="v">${p.x.toFixed(0)}, ${p.y.toFixed(0)}</span></div>
     `;
   }
 
@@ -1098,8 +1098,8 @@
       <div class="window-header">
         <span class="info-title"></span>
         <div class="window-btns">
-          <button class="win-min" title="Minimalizuj">–</button>
-          <button class="win-close" title="Zamknij">✕</button>
+          <button class="win-min" title="Minimize">–</button>
+          <button class="win-close" title="Close">✕</button>
         </div>
       </div>
       <div class="window-body"></div>
@@ -1110,7 +1110,7 @@
     makeDraggable(el);
     el.querySelector('.win-min').addEventListener('click', () => {
       minimizeWin(el, null);
-      addDynamicDockIcon('info-' + p.id, 'Foton #' + p.id, () => { restoreWin(el, null); removeDynamicDockIcon('info-' + p.id); });
+      addDynamicDockIcon('info-' + p.id, 'Photon #' + p.id, () => { restoreWin(el, null); removeDynamicDockIcon('info-' + p.id); });
     });
     el.querySelector('.win-close').addEventListener('click', () => closeInfoWindow(p.id));
     renderInfoPanel(p, w);
@@ -1174,7 +1174,7 @@
     for (const p of ps) {
       const tr = document.createElement('tr');
       tr.className = 'pick' + (openInfoWindows.has(p.id) ? ' row-open' : '');
-      tr.innerHTML = `<td><span class="swatch" style="background:${photonColor(p,1)}"></span>${p.id}</td><td>${p.charge.toFixed(2)}</td><td>${p.maxSpeed.toFixed(0)} px/s</td><td>${p.energy.toFixed(2)}</td><td>${p.mass.toFixed(2)}</td><td>${p.force.toFixed(0)}</td><td>${p.forceRange.toFixed(0)}</td><td><button class="var-del row-del" title="Usuń foton z symulacji">✕</button></td>`;
+      tr.innerHTML = `<td><span class="swatch" style="background:${photonColor(p,1)}"></span>${p.id}</td><td>${p.charge.toFixed(2)}</td><td>${p.maxSpeed.toFixed(0)} px/s</td><td>${p.energy.toFixed(2)}</td><td>${p.mass.toFixed(2)}</td><td>${p.force.toFixed(0)}</td><td>${p.forceRange.toFixed(0)}</td><td><button class="var-del row-del" title="Remove photon from the simulation">✕</button></td>`;
       tr.addEventListener('click', () => selectPhoton(p.id));
       tr.addEventListener('contextmenu', (e) => {
         e.preventDefault();
@@ -1264,11 +1264,11 @@
     el.style.left = (320 + (n % 10) * 24) + 'px';
     el.innerHTML = `
       <div class="window-header">
-        <span>Reaktor</span>
+        <span>Reactor</span>
         <div class="window-btns">
-          <button class="reactor-clear" title="Wyczyść ślady">🧹</button>
-          <button class="win-min" title="Minimalizuj">–</button>
-          <button class="win-close" title="Zamknij">✕</button>
+          <button class="reactor-clear" title="Clear trails">🧹</button>
+          <button class="win-min" title="Minimize">–</button>
+          <button class="win-close" title="Close">✕</button>
         </div>
       </div>
       <div class="window-body"><canvas width="${REACTOR_SIZE}" height="${REACTOR_SIZE}"></canvas></div>
@@ -1517,7 +1517,7 @@
   makeDraggable(winList);
   winList.querySelector('.win-min').addEventListener('click', () => {
     minimizeWin(winList, null);
-    if (listSelection.size) addDynamicDockIcon('list', 'Zaznaczone (' + listSelection.size + ')', () => { restoreWin(winList, null); removeDynamicDockIcon('list'); });
+    if (listSelection.size) addDynamicDockIcon('list', 'Selected (' + listSelection.size + ')', () => { restoreWin(winList, null); removeDynamicDockIcon('list'); });
   });
   winList.querySelector('.win-close').addEventListener('click', () => {
     minimizeWin(winList, null);
@@ -1540,7 +1540,7 @@
   // ---------- clear data: wipes saved editor formulas + window layout ----------
   const clearDataBtn = document.getElementById('clearDataBtn');
   clearDataBtn.addEventListener('click', () => {
-    if (!confirm('Usunąć zapisane dane (formuły edytora, rozmiar/pozycję okienek oraz ustawienia statystyk) i przywrócić ustawienia domyślne?')) return;
+    if (!confirm('Delete saved data (editor formulas, window size/position, and stats settings) and restore the defaults?')) return;
     try {
       localStorage.removeItem(LS_KEY);
       localStorage.removeItem(WIN_LS_KEY);
@@ -1549,7 +1549,7 @@
     location.reload();
   });
 
-  // ---------- brush tools: zaznaczanie / przyciąganie / spawn ----------
+  // ---------- brush tools: select / attract / spawn ----------
   let currentTool = 'select';   // 'select' | 'attract' | 'spawn'
   let attractCharge = 'all';    // 'all' | 'pos' | 'neg'
 
@@ -1560,12 +1560,12 @@
 
   function updateHint() {
     if (currentTool === 'select') {
-      hintEl.textContent = 'Kliknij foton = szczegóły • przeciągnij prostokąt = lista fotonów';
+      hintEl.textContent = 'Click a photon = details • drag a rectangle = photon list';
     } else if (currentTool === 'attract') {
-      const label = attractCharge === 'all' ? 'wszystkie ładunki' : (attractCharge === 'pos' ? 'ładunki dodatnie (+)' : 'ładunki ujemne (–)');
-      hintEl.textContent = 'Przytrzymaj i przesuwaj kursor, aby przyciągać do niego: ' + label;
+      const label = attractCharge === 'all' ? 'all charges' : (attractCharge === 'pos' ? 'positive charges (+)' : 'negative charges (–)');
+      hintEl.textContent = 'Hold and move the cursor to attract toward it: ' + label;
     } else {
-      hintEl.textContent = 'Kliknij lub przeciągnij, aby tworzyć nowe fotony (wg edytora fotonu)';
+      hintEl.textContent = 'Click or drag to create new photons (per the photon editor)';
     }
   }
 
@@ -1685,7 +1685,7 @@
     rectActive = false;
   });
 
-  // Delete key: removes every photon currently in the "Zaznaczone fotony" list from
+  // Delete key: removes every photon currently in the "Selected photons" list from
   // the simulation. Ignored while typing in an input/textarea (e.g. editor fields).
   window.addEventListener('keydown', (e) => {
     if (e.key !== 'Delete') return;

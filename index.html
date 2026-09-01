@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="pl">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Symulacja fotonów</title>
+<title>Photon Simulation</title>
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -10,28 +10,28 @@
 <div id="topbar">
   <button id="toggleBtn">Start</button>
   <div id="speedRow">
-    <label for="speed">Szybkość symulacji</label>
+    <label for="speed">Simulation speed</label>
     <input type="range" id="speed" min="0.1" max="3" step="0.1" value="1">
     <span id="speedVal">1.0x</span>
   </div>
 
   <div class="toolgroup" id="toolGroup">
-    <span class="tg-label">Pędzel</span>
-    <button class="tool-btn active" data-tool="select">Zaznaczanie</button>
-    <button class="tool-btn" data-tool="attract">Przyciąganie</button>
+    <span class="tg-label">Brush</span>
+    <button class="tool-btn active" data-tool="select">Select</button>
+    <button class="tool-btn" data-tool="attract">Attract</button>
     <button class="tool-btn" data-tool="spawn">Spawn</button>
   </div>
 
   <div class="toolgroup hidden" id="chargeGroup">
-    <span class="tg-label">Ładunek</span>
+    <span class="tg-label">Charge</span>
     <button class="charge-btn" data-charge="pos">+</button>
     <button class="charge-btn" data-charge="neg">–</button>
-    <button class="charge-btn active" data-charge="all">wszystkie</button>
+    <button class="charge-btn active" data-charge="all">all</button>
   </div>
 
-  <div id="hint">Kliknij foton = szczegóły &nbsp;•&nbsp; przeciągnij prostokąt = lista fotonów</div>
+  <div id="hint">Click a photon = details &nbsp;•&nbsp; drag a rectangle = photon list</div>
 
-  <button id="clearDataBtn" title="Usuwa zapisane ustawienia edytora oraz rozmiar/pozycję okienek i przywraca wartości domyślne">Wyczyść dane</button>
+  <button id="clearDataBtn" title="Deletes saved editor settings and window size/position, restoring the defaults">Clear data</button>
 </div>
 
 <canvas id="sim"></canvas>
@@ -47,57 +47,57 @@
 <!-- left side: statistics + (contextual) selection list -->
 <div class="window" id="winStats" style="top:60px; left:16px;">
   <div class="window-header">
-    <span>Statystyki</span>
+    <span>Stats</span>
     <div class="window-btns">
-      <button id="statConfigBtn" title="Ustawienia statystyk">⚙</button>
-      <button class="win-min" title="Minimalizuj">–</button>
+      <button id="statConfigBtn" title="Stats settings">⚙</button>
+      <button class="win-min" title="Minimize">–</button>
     </div>
   </div>
   <div class="window-body">
-    <div class="row" data-stat-row="total"><span class="k">Fotony</span><span class="v" id="statTotal">0</span></div>
-    <div class="row" data-stat-row="pos"><span class="k">Ładunek dodatni</span><span class="v" id="statPos">0</span></div>
-    <div class="row" data-stat-row="neg"><span class="k">Ładunek ujemny</span><span class="v" id="statNeg">0</span></div>
-    <div class="row" data-stat-row="collisions"><span class="k">Zderzenia</span><span class="v" id="statCollisions">0</span></div>
-    <div class="row" data-stat-row="avgSpeed"><span class="k">Średnia prędkość</span><span class="v" id="statAvgSpeed">0</span></div>
+    <div class="row" data-stat-row="total"><span class="k">Photons</span><span class="v" id="statTotal">0</span></div>
+    <div class="row" data-stat-row="pos"><span class="k">Positive charge</span><span class="v" id="statPos">0</span></div>
+    <div class="row" data-stat-row="neg"><span class="k">Negative charge</span><span class="v" id="statNeg">0</span></div>
+    <div class="row" data-stat-row="collisions"><span class="k">Collisions</span><span class="v" id="statCollisions">0</span></div>
+    <div class="row" data-stat-row="avgSpeed"><span class="k">Average speed</span><span class="v" id="statAvgSpeed">0</span></div>
   </div>
 </div>
 
 <div class="window minimized" id="winStatConfig" style="top:60px; left:284px;">
   <div class="window-header">
-    <span>Ustawienia statystyk</span>
+    <span>Stats settings</span>
     <div class="window-btns">
-      <button class="win-min" title="Minimalizuj">–</button>
-      <button class="win-close" title="Zamknij">✕</button>
+      <button class="win-min" title="Minimize">–</button>
+      <button class="win-close" title="Close">✕</button>
     </div>
   </div>
   <div class="window-body">
-    <div class="field-hint">Wybierz, które dane mają się wyświetlać w oknie Statystyki.</div>
-    <label class="var-row"><input type="checkbox" class="stat-toggle" data-stat="total" checked> Fotony</label>
-    <label class="var-row"><input type="checkbox" class="stat-toggle" data-stat="pos" checked> Ładunek dodatni</label>
-    <label class="var-row"><input type="checkbox" class="stat-toggle" data-stat="neg" checked> Ładunek ujemny</label>
-    <label class="var-row"><input type="checkbox" class="stat-toggle" data-stat="collisions" checked> Zderzenia</label>
-    <label class="var-row"><input type="checkbox" class="stat-toggle" data-stat="avgSpeed"> Średnia prędkość</label>
+    <div class="field-hint">Choose which data to show in the Stats window.</div>
+    <label class="var-row"><input type="checkbox" class="stat-toggle" data-stat="total" checked> Photons</label>
+    <label class="var-row"><input type="checkbox" class="stat-toggle" data-stat="pos" checked> Positive charge</label>
+    <label class="var-row"><input type="checkbox" class="stat-toggle" data-stat="neg" checked> Negative charge</label>
+    <label class="var-row"><input type="checkbox" class="stat-toggle" data-stat="collisions" checked> Collisions</label>
+    <label class="var-row"><input type="checkbox" class="stat-toggle" data-stat="avgSpeed"> Average speed</label>
   </div>
 </div>
 
 <div class="window minimized" id="winList" style="top:60px; left:400px;">
   <div class="window-header">
-    <span>Zaznaczone fotony</span>
+    <span>Selected photons</span>
     <div class="window-btns">
-      <button class="win-min" title="Minimalizuj">–</button>
-      <button class="win-close" title="Zamknij">✕</button>
+      <button class="win-min" title="Minimize">–</button>
+      <button class="win-close" title="Close">✕</button>
     </div>
   </div>
   <div class="window-body">
     <table>
       <thead><tr>
-        <th class="sortable" data-sort-key="id" title="Sortuj wg Lp">#<span class="sort-arrow"></span></th>
-        <th class="sortable" data-sort-key="charge" title="Sortuj wg ładunku">Ładunek<span class="sort-arrow"></span></th>
-        <th class="sortable" data-sort-key="speed" title="Sortuj wg szybkości">Szybkość<span class="sort-arrow"></span></th>
-        <th class="sortable" data-sort-key="energy" title="Sortuj wg energii">Energia<span class="sort-arrow"></span></th>
-        <th class="sortable" data-sort-key="mass" title="Sortuj wg masy">Masa<span class="sort-arrow"></span></th>
-        <th class="sortable" data-sort-key="force" title="Sortuj wg force">Force<span class="sort-arrow"></span></th>
-        <th class="sortable" data-sort-key="forceRange" title="Sortuj wg zasięgu">Zasięg<span class="sort-arrow"></span></th>
+        <th class="sortable" data-sort-key="id" title="Sort by #">#<span class="sort-arrow"></span></th>
+        <th class="sortable" data-sort-key="charge" title="Sort by charge">Charge<span class="sort-arrow"></span></th>
+        <th class="sortable" data-sort-key="speed" title="Sort by speed">Speed<span class="sort-arrow"></span></th>
+        <th class="sortable" data-sort-key="energy" title="Sort by energy">Energy<span class="sort-arrow"></span></th>
+        <th class="sortable" data-sort-key="mass" title="Sort by mass">Mass<span class="sort-arrow"></span></th>
+        <th class="sortable" data-sort-key="force" title="Sort by force">Force<span class="sort-arrow"></span></th>
+        <th class="sortable" data-sort-key="forceRange" title="Sort by range">Range<span class="sort-arrow"></span></th>
         <th></th>
       </tr></thead>
       <tbody id="listBody"></tbody>
@@ -107,22 +107,22 @@
 
 <div class="window" id="winForce" style="top:300px; left:16px;">
   <div class="window-header">
-    <span>Podgląd sił</span>
-    <div class="window-btns"><button class="win-min" title="Minimalizuj">–</button></div>
+    <span>Force preview</span>
+    <div class="window-btns"><button class="win-min" title="Minimize">–</button></div>
   </div>
   <div class="window-body">
-    <div class="field-hint">Pole sił dla skrajnych ładunków (+1 i -1), w skali — siła jest sinusoidalna, więc pierścienie na przemian przyciągają (kolor fotonu) i odpychają (czerwono), zanikając ku krawędzi zasięgu. Tuż przy środku zawsze mały twardy rdzeń odpychający (żeby fotony się nie nakładały).</div>
+    <div class="field-hint">Force field for the extreme charges (+1 and -1), to scale — the force is sinusoidal, so the rings alternately attract (photon color) and repel (red), fading toward the edge of the range. Right at the center there's always a small repulsive hard core (so photons don't overlap).</div>
     <canvas id="forceCanvas" width="380" height="230"></canvas>
   </div>
 </div>
 
 <div class="window" id="winForceGraph" style="top:300px; left:444px;">
   <div class="window-header">
-    <span>Rozkład sił (wykres)</span>
-    <div class="window-btns"><button class="win-min" title="Minimalizuj">–</button></div>
+    <span>Force graph</span>
+    <div class="window-btns"><button class="win-min" title="Minimize">–</button></div>
   </div>
   <div class="window-body">
-    <div class="field-hint">Siła w funkcji odległości, w poziomie. Oś pozioma = dystans w px (0 do <code>forceRange</code>), oś pionowa = siła (w górę = przyciąga, w dół = odpycha). Niebieska krzywa = przeciwne ładunki, pomarańczowa = ten sam ładunek — widać, że są przesunięte o pół okresu.</div>
+    <div class="field-hint">Force as a function of distance, horizontal layout. Horizontal axis = distance in px (0 to <code>forceRange</code>), vertical axis = force (up = attracts, down = repels). Blue curve = opposite charges, orange = same charge — you can see they're offset by half a period.</div>
     <canvas id="forceGraphCanvas" width="420" height="220"></canvas>
   </div>
 </div>
@@ -130,50 +130,50 @@
 <!-- bottom: color filter -->
 <div class="window" id="winFilter" style="bottom:60px; left:16px;">
   <div class="window-header">
-    <span>Filtr</span>
-    <div class="window-btns"><button class="win-min" title="Minimalizuj">–</button></div>
+    <span>Filter</span>
+    <div class="window-btns"><button class="win-min" title="Minimize">–</button></div>
   </div>
   <div class="window-body">
-    <div class="field-hint">Sposób kolorowania fotonów na wykresie wg ładunku.</div>
+    <div class="field-hint">How photons are colored based on charge.</div>
     <div class="toolgroup" id="colorModeGroup">
-      <button class="tool-btn active" data-color-mode="default" title="Trzy płaskie kolory bez gradientu: ujemny = niebieski, 0 = biały, dodatni = pomarańczowy">Domyślne</button>
-      <button class="tool-btn" data-color-mode="intensity" title="Skala dopasowana do aktualnego zakresu ładunków: 0 = biały, najsilniejszy obecny ładunek = pełne nasycenie">Natężenie wg ładunku</button>
-      <button class="tool-btn" data-color-mode="speed" title="Biały = najszybszy obecny foton, czerwony = najwolniejszy — wg rankingu (percentyla), nie surowej wartości, więc kolory rozkładają się równomiernie">Szybkość</button>
+      <button class="tool-btn active" data-color-mode="default" title="Three flat colors, no gradient: negative = blue, 0 = white, positive = orange">Default</button>
+      <button class="tool-btn" data-color-mode="intensity" title="Scale fitted to the current charge range: 0 = white, the strongest charge present = full saturation">Intensity by charge</button>
+      <button class="tool-btn" data-color-mode="speed" title="White = fastest photon present, red = slowest — ranked by percentile, not raw value, so colors spread out evenly">Speed</button>
     </div>
-    <label class="var-row"><input type="checkbox" id="glowToggle"> Poświata wokół fotonów</label>
+    <label class="var-row"><input type="checkbox" id="glowToggle"> Glow around photons</label>
   </div>
 </div>
 
 <!-- right side: photon editor, (contextual) photon info -->
 <div class="window" id="winEditor" style="top:60px; right:16px;">
   <div class="window-header">
-    <span>Edytor fotonu</span>
+    <span>Photon editor</span>
     <div class="window-btns">
-      <button id="exportVarsBtn" title="Eksportuj zmienne do pliku CSV">📤</button>
-      <button id="importVarsBtn" title="Importuj zmienne z pliku CSV">📥</button>
-      <button id="copyVarsBtn" title="Kopiuj zmienne do schowka">📋</button>
-      <button class="win-min" title="Minimalizuj">–</button>
+      <button id="exportVarsBtn" title="Export variables to a CSV file">📤</button>
+      <button id="importVarsBtn" title="Import variables from a CSV file">📥</button>
+      <button id="copyVarsBtn" title="Copy variables to clipboard">📋</button>
+      <button class="win-min" title="Minimize">–</button>
     </div>
   </div>
   <div class="window-body">
-    <div class="field-hint">Siła między fotonami jest sinusoidalna — na przemian przyciąga i odpycha wraz z odległością, aż zaniknie na <code>forceRange</code>. <code>periods</code> to liczba pełnych okresów fali w tym zasięgu (może być ułamkowa). Przeciwne ładunki i takie same są przesunięte w fazie o pół okresu, więc w tej samej „warstwie” jedne się przyciągają, a drugie odpychają. <code>waveOffset</code> (0 do 1) przesuwa falę w górę: przy 0 to klasyczna fala (może chwilami przyciągać ten sam ładunek), przy 1 znak siły nigdy się nie zmienia (ten sam ładunek zawsze odpycha). Możesz dodawać własne zmienne pomocnicze (przycisk niżej) i edytować wzory — dostępne funkcje: <code>rand, abs, min, max, sqrt, pow, round, floor, ceil</code>. Strzałkami zmienisz kolejność obliczania.</div>
+    <div class="field-hint">The force between photons is sinusoidal — it alternately attracts and repels with distance, fading out at <code>forceRange</code>. <code>periods</code> is the number of full wave cycles within that range (can be fractional). Opposite and same charges are phase-shifted by half a period, so within the same "layer" one attracts while the other repels. <code>waveOffset</code> (0 to 1) shifts the wave upward: at 0 it's the classic wave (can briefly attract the same charge), at 1 the sign of the force never flips (the same charge always repels). You can add your own helper variables (button below) and edit formulas — available functions: <code>rand, abs, min, max, sqrt, pow, round, floor, ceil</code>. Use the arrows to change the calculation order.</div>
     <div id="editorRows"></div>
-    <button class="add-var-btn" id="addVarBtn">+ Dodaj zmienną pomocniczą</button>
+    <button class="add-var-btn" id="addVarBtn">+ Add helper variable</button>
     <input type="file" id="importVarsInput" accept=".csv,text/csv" style="display:none">
   </div>
 </div>
 
 <!-- photon info windows are created dynamically (one per selected photon) — see openInfoWindow() -->
-<!-- reactor windows are created dynamically (one per "Reaktor" action) — see openReactor() -->
+<!-- reactor windows are created dynamically (one per "Reactor" action) — see openReactor() -->
 
-<div id="ctxMenu"><button id="ctxReactorBtn">⚛ Reaktor</button></div>
+<div id="ctxMenu"><button id="ctxReactorBtn">⚛ Reactor</button></div>
 
 <div id="dock">
-  <button class="dock-icon active" id="dockStats">Statystyki</button>
-  <button class="dock-icon active" id="dockEditor">Edytor fotonu</button>
-  <button class="dock-icon active" id="dockForce">Podgląd sił</button>
-  <button class="dock-icon active" id="dockForceGraph">Rozkład sił</button>
-  <button class="dock-icon active" id="dockFilter">Filtr</button>
+  <button class="dock-icon active" id="dockStats">Stats</button>
+  <button class="dock-icon active" id="dockEditor">Photon editor</button>
+  <button class="dock-icon active" id="dockForce">Force preview</button>
+  <button class="dock-icon active" id="dockForceGraph">Force graph</button>
+  <button class="dock-icon active" id="dockFilter">Filter</button>
 </div>
 
 <script src="js/script.js"></script>
