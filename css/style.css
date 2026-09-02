@@ -69,6 +69,8 @@
     line-height: 1; padding: 3px 6px; border-radius: 4px;
   }
   .window-btns button:hover { color: #fff; background: rgba(255,255,255,0.08); }
+  .reactor-view { font-size: 10px !important; font-weight: 600; }
+  .reactor-view.active { color: #fff; background: rgba(108,133,201,0.35); }
   .window-body { padding: 10px 12px; overflow-y: auto; flex: 1 1 auto; min-height: 0; }
 
   .row { display: flex; justify-content: space-between; padding: 3px 0; gap: 12px; }

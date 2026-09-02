@@ -1369,6 +1369,7 @@
       <div class="window-header">
         <span>Reactor</span>
         <div class="window-btns">
+          <button class="reactor-view" title="Toggle 2D / 2.5D view">2D</button>
           <button class="reactor-clear" title="Clear trails">🧹</button>
           <button class="win-min" title="Minimize">–</button>
           <button class="win-close" title="Close">✕</button>
@@ -1379,7 +1380,7 @@
     document.body.appendChild(el);
 
     const canvas = el.querySelector('canvas');
-    const reactor = { el, ctx: canvas.getContext('2d'), photons: srcPhotons.map(makeReactorPhoton) };
+    const reactor = { el, ctx: canvas.getContext('2d'), photons: srcPhotons.map(makeReactorPhoton), mode: '2D' };
     reactors.push(reactor);
 
     makeDraggable(el);
@@ -1387,6 +1388,12 @@
     el.querySelector('.win-close').addEventListener('click', () => closeReactor(reactor));
     el.querySelector('.reactor-clear').addEventListener('click', () => {
       reactor.photons.forEach(p => { p.trail.length = 0; });
+    });
+    const viewBtn = el.querySelector('.reactor-view');
+    viewBtn.addEventListener('click', () => {
+      reactor.mode = reactor.mode === '2D' ? '2.5D' : '2D';
+      viewBtn.textContent = reactor.mode;
+      viewBtn.classList.toggle('active', reactor.mode === '2.5D');
     });
   }
 
@@ -1442,8 +1449,7 @@
     }
   }
 
-  function renderReactor(r) {
-    if (r.el.classList.contains('minimized')) return;
+  function renderReactor2D(r) {
     const ctx = r.ctx;
     ctx.clearRect(0, 0, REACTOR_SIZE, REACTOR_SIZE);
     ctx.fillStyle = '#05060a';
@@ -1471,6 +1477,102 @@
       ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
       ctx.fill();
     }
+  }
+
+  // ---------- 2.5D view: a wireframe mesh warped by the same force wave that
+  // governs the photons, viewed from a tilted angle so the undulation reads as
+  // height. Purely a visualization — stepReactor()'s physics is untouched.
+  const REACTOR_GRID_N = 16;       // mesh cells per axis
+  const REACTOR_TILT = 0.55;       // vertical foreshortening simulating the tilt
+  const REACTOR_HEIGHT_SCALE = 16; // px of screen rise per unit of field height
+  const REACTOR_HEIGHT_CLAMP = 3;  // caps the field sum so overlapping photons don't fly off-canvas
+
+  // net "field height" at a point: same wave shape (waveTerm) and envelope as the
+  // real pairwise force, summed over every photon and signed by charge — not a real
+  // physical potential, just a visual stand-in for "how wavy the field is here".
+  function reactorFieldHeight(wx, wy, photons) {
+    let h = 0;
+    for (const p of photons) {
+      const dx = wrapDelta(wx - p.x, REACTOR_SIZE);
+      const dy = wrapDelta(wy - p.y, REACTOR_SIZE);
+      const d = Math.max(0.01, Math.sqrt(dx * dx + dy * dy));
+      if (d >= p.forceRange) continue;
+      const envelope = 1 - d / p.forceRange;
+      const sign = p.charge >= 0 ? 1 : -1;
+      h += sign * waveTerm(d, p.forceRange, p.periods, p.waveOffset, p.phaseShift) * envelope;
+    }
+    return Math.max(-REACTOR_HEIGHT_CLAMP, Math.min(REACTOR_HEIGHT_CLAMP, h));
+  }
+
+  function reactorProject(wx, wy, h) {
+    return [wx, REACTOR_SIZE / 2 + (wy - REACTOR_SIZE / 2) * REACTOR_TILT - h * REACTOR_HEIGHT_SCALE];
+  }
+
+  function renderReactor25D(r) {
+    const ctx = r.ctx;
+    ctx.clearRect(0, 0, REACTOR_SIZE, REACTOR_SIZE);
+    ctx.fillStyle = '#05060a';
+    ctx.fillRect(0, 0, REACTOR_SIZE, REACTOR_SIZE);
+
+    const n = REACTOR_GRID_N, cell = REACTOR_SIZE / n;
+    const heights = [], pts = [];
+    for (let gy = 0; gy <= n; gy++) {
+      const hRow = [], pRow = [];
+      for (let gx = 0; gx <= n; gx++) {
+        const wx = gx * cell, wy = gy * cell;
+        const h = reactorFieldHeight(wx, wy, r.photons);
+        hRow.push(h);
+        pRow.push(reactorProject(wx, wy, h));
+      }
+      heights.push(hRow);
+      pts.push(pRow);
+    }
+
+    ctx.lineWidth = 1;
+    for (let gy = 0; gy <= n; gy++) {
+      for (let gx = 0; gx < n; gx++) {
+        const t = (heights[gy][gx] + heights[gy][gx + 1]) / (2 * REACTOR_HEIGHT_CLAMP);
+        ctx.strokeStyle = blendChargeColor(Math.max(-1, Math.min(1, t)), 0.4);
+        ctx.beginPath();
+        ctx.moveTo(pts[gy][gx][0], pts[gy][gx][1]);
+        ctx.lineTo(pts[gy][gx + 1][0], pts[gy][gx + 1][1]);
+        ctx.stroke();
+      }
+    }
+    for (let gx = 0; gx <= n; gx++) {
+      for (let gy = 0; gy < n; gy++) {
+        const t = (heights[gy][gx] + heights[gy + 1][gx]) / (2 * REACTOR_HEIGHT_CLAMP);
+        ctx.strokeStyle = blendChargeColor(Math.max(-1, Math.min(1, t)), 0.4);
+        ctx.beginPath();
+        ctx.moveTo(pts[gy][gx][0], pts[gy][gx][1]);
+        ctx.lineTo(pts[gy + 1][gx][0], pts[gy + 1][gx][1]);
+        ctx.stroke();
+      }
+    }
+
+    // photons as "pins": a thin stalk down to the base plane, then the dot at
+    // its actual elevation — sells the depth better than a flat dot alone
+    for (const p of r.photons) {
+      const h = reactorFieldHeight(p.x, p.y, r.photons);
+      const [bx, by] = reactorProject(p.x, p.y, 0);
+      const [tx, ty] = reactorProject(p.x, p.y, h);
+      ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(bx, by);
+      ctx.lineTo(tx, ty);
+      ctx.stroke();
+      ctx.fillStyle = photonColor(p, 0.95);
+      ctx.beginPath();
+      ctx.arc(tx, ty, p.radius + 0.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function renderReactor(r) {
+    if (r.el.classList.contains('minimized')) return;
+    if (r.mode === '2.5D') renderReactor25D(r);
+    else renderReactor2D(r);
   }
 
   function updateReactors(dt) {
