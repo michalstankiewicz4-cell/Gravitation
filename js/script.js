@@ -94,8 +94,14 @@
       && REQUIRED_ROLES.every(r => arr.filter(v => v && v.role === r).length === 1)
       && arr.every(v => v && typeof v.name === 'string' && typeof v.expr === 'string'
         && (v.role == null || REQUIRED_ROLES.includes(v.role)));
-    if (!ok) return DEFAULT_VARS.map(v => Object.assign({}, v));
-    return arr.map(v => ({ role: v.role || null, name: v.name, expr: v.expr }));
+    return (ok ? arr : DEFAULT_VARS).map(v => ({
+      role: v.role || null, name: v.name, expr: v.expr,
+      // optional slider input mode: lets a row's number be dragged between min/max
+      // instead of typed as a formula — expr still just holds the resulting literal
+      slider: !!v.slider,
+      min: typeof v.min === 'number' && isFinite(v.min) ? v.min : 0,
+      max: typeof v.max === 'number' && isFinite(v.max) ? v.max : 10
+    }));
   }
   function loadSettings() {
     try {
@@ -873,7 +879,8 @@
     rowEls.forEach((rowEl, idx) => {
       const exprInput = rowEl.querySelector('.var-expr');
       exprInput.classList.toggle('err', !!errors[idx]);
-      exprInput.title = errors[idx] || '';
+      exprInput.title = errors[idx] || (variables[idx].slider
+        ? 'Driven by the slider below — toggle 🎚 off to type a formula instead' : '');
     });
   }
 
@@ -888,7 +895,7 @@
   function addVar() {
     let n = variables.length + 1;
     while (variables.some(v => v.name === ('var' + n))) n++;
-    variables.push({ role: null, name: 'var' + n, expr: '0' });
+    variables.push({ role: null, name: 'var' + n, expr: '0', slider: false, min: 0, max: 10 });
     saveSettings();
     renderEditorRows();
   }
@@ -900,6 +907,26 @@
     renderEditorRows();
   }
 
+  // switches a row between typing a formula and dragging a slider between a min/max
+  // (the slider just writes a plain number literal into the same row.expr — the
+  // compile/eval pipeline doesn't know or care which input mode produced it)
+  function toggleVarSlider(idx) {
+    const row = variables[idx];
+    row.slider = !row.slider;
+    if (row.slider && row.min === 0 && row.max === 10) {
+      // first time this row goes into slider mode: center a range around whatever
+      // plain-number value it currently holds, instead of leaving the generic 0-10
+      const cur = parseFloat(row.expr);
+      if (isFinite(cur)) {
+        const pad = Math.max(Math.abs(cur), 1);
+        row.min = cur - pad;
+        row.max = cur + pad;
+      }
+    }
+    saveSettings();
+    renderEditorRows();
+  }
+
   function renderEditorRows() {
     editorRows.innerHTML = '';
     variables.forEach((row, idx) => {
@@ -907,22 +934,41 @@
       const el = document.createElement('div');
       el.className = 'var-row';
       el.innerHTML = `
-        <div class="var-order">
-          <button class="var-up" title="Move up">▲</button>
-          <button class="var-down" title="Move down">▼</button>
+        <div class="var-row-main">
+          <div class="var-order">
+            <button class="var-up" title="Move up">▲</button>
+            <button class="var-down" title="Move down">▼</button>
+          </div>
+          <input type="text" class="var-name" spellcheck="false">
+          <span>:</span>
+          <input type="text" class="var-expr" spellcheck="false">
+          <button class="var-slider-toggle${row.slider ? ' active' : ''}" title="Toggle slider input">🎚</button>
+          ${isCustom ? '<button class="var-del" title="Delete helper variable">✕</button>' : ''}
         </div>
-        <input type="text" class="var-name" spellcheck="false">
-        <span>:</span>
-        <input type="text" class="var-expr" spellcheck="false">
-        ${isCustom ? '<button class="var-del" title="Delete helper variable">✕</button>' : ''}
+        <div class="var-slider-group" ${row.slider ? '' : 'hidden'}>
+          <input type="number" class="var-min" step="any">
+          <input type="range" class="var-range" step="any">
+          <input type="number" class="var-max" step="any">
+        </div>
       `;
       const nameInput = el.querySelector('.var-name');
       const exprInput = el.querySelector('.var-expr');
+      const minInput = el.querySelector('.var-min');
+      const maxInput = el.querySelector('.var-max');
+      const rangeInput = el.querySelector('.var-range');
       nameInput.value = row.name;
       exprInput.value = row.expr;
       if (!isCustom) nameInput.title = "Built-in photon property — you can rename it, but the row can't be deleted";
       el.querySelector('.var-up').disabled = idx === 0;
       el.querySelector('.var-down').disabled = idx === variables.length - 1;
+
+      minInput.value = row.min;
+      maxInput.value = row.max;
+      rangeInput.min = row.min;
+      rangeInput.max = row.max;
+      const curVal = parseFloat(row.expr);
+      rangeInput.value = isFinite(curVal) ? curVal : (row.min + row.max) / 2;
+      exprInput.readOnly = row.slider; // title is set by revalidateAll() below
 
       nameInput.addEventListener('input', () => {
         row.name = nameInput.value;
@@ -934,6 +980,22 @@
         saveSettings();
         revalidateAll();
       });
+      rangeInput.addEventListener('input', () => {
+        exprInput.value = row.expr = rangeInput.value;
+        saveSettings();
+        revalidateAll();
+      });
+      minInput.addEventListener('change', () => {
+        row.min = parseFloat(minInput.value) || 0;
+        saveSettings();
+        renderEditorRows();
+      });
+      maxInput.addEventListener('change', () => {
+        row.max = parseFloat(maxInput.value) || 0;
+        saveSettings();
+        renderEditorRows();
+      });
+      el.querySelector('.var-slider-toggle').addEventListener('click', () => toggleVarSlider(idx));
       el.querySelector('.var-up').addEventListener('click', () => moveVar(idx, -1));
       el.querySelector('.var-down').addEventListener('click', () => moveVar(idx, 1));
       const delBtn = el.querySelector('.var-del');
@@ -1046,7 +1108,8 @@
     const parsed = dataRows.map(r => ({
       role: (r[0] || '').trim() || null,
       name: (r[1] || '').trim(),
-      expr: (r[2] || '').trim()
+      expr: (r[2] || '').trim(),
+      slider: false, min: 0, max: 10
     })).filter(v => v.name);
     for (const v of parsed) {
       if (v.role && !REQUIRED_ROLES.includes(v.role)) return { error: `Unknown role "${v.role}" in row "${v.name}".` };
