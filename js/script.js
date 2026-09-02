@@ -1563,8 +1563,8 @@
       ctx.stroke();
     }
 
-    // photons as "pins": a thin stalk down to the base plane, then the dot at
-    // its actual elevation — sells the depth better than a flat dot alone
+    // photons stay on one flat level — only the stalk moves up/down to show the
+    // local field deviation, so the balls themselves don't bounce around
     for (const p of r.photons) {
       const h = reactorFieldHeight(p.x, p.y, r.photons);
       const [bx, by] = reactorProject(p.x, p.y, 0);
@@ -1577,7 +1577,7 @@
       ctx.stroke();
       ctx.fillStyle = photonColor(p, 0.95);
       ctx.beginPath();
-      ctx.arc(tx, ty, p.radius + 0.5, 0, Math.PI * 2);
+      ctx.arc(bx, by, p.radius + 0.5, 0, Math.PI * 2);
       ctx.fill();
     }
   }
