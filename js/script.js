@@ -745,6 +745,34 @@
     gctx.stroke();
     gctx.setLineDash([]);
 
+    // period tick marks: one per full wave cycle, labeled with distance in px.
+    // Skipped near the very edges so labels don't collide with the "0"/range labels,
+    // and text is dropped (ticks stay) once periods are packed too tightly to read.
+    const periodsMag = Math.abs(periodsAvg);
+    if (periodsMag > 0) {
+      const periodPx = range / periodsMag;
+      const tickScreenSpacing = xForD(periodPx) - xForD(0);
+      const showLabels = tickScreenSpacing >= 26;
+      gctx.strokeStyle = 'rgba(255,255,255,0.12)';
+      gctx.setLineDash([2, 3]);
+      gctx.fillStyle = '#8b93ad';
+      gctx.font = '9px sans-serif';
+      gctx.textAlign = 'center';
+      const maxTicks = Math.min(Math.floor(periodsMag), 200); // safety cap
+      for (let k = 1; k <= maxTicks; k++) {
+        const d = k * periodPx;
+        if (d > range * 0.98) break; // too close to the right edge / "range px" label
+        if (d < range * 0.02) continue; // too close to the "0" label
+        const x = xForD(d);
+        gctx.beginPath();
+        gctx.moveTo(x, padT); gctx.lineTo(x, h - padB);
+        gctx.stroke();
+        if (showLabels) gctx.fillText(d.toFixed(0), x, h - padB + 14);
+      }
+      gctx.setLineDash([]);
+      gctx.textAlign = 'left'; // restore default used just below
+    }
+
     function drawCurve(chargeProduct, color) {
       gctx.strokeStyle = color;
       gctx.lineWidth = 2;
