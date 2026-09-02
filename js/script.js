@@ -57,7 +57,7 @@
   updateZoomIndicator();
 
   // ---------- persisted settings: photon editor variables + rules ----------
-  const LS_KEY = 'photonSim.settings.v9'; // v9: new default formulas
+  const LS_KEY = 'photonSim.settings.v10'; // v10: added the phaseShift role
   // each row: { role, name, expr }. Rows with a "role" feed directly into the photon
   // (charge / mass / maxSpeed / energy / force / forceRange / periods) — exactly one
   // row per required role, and role never changes. Rows with role:null are helper/
@@ -71,7 +71,7 @@
   // periods * d / forceRange) * (1 - d/forceRange), sign-flipped for same-charge pairs.
   // That gives naturally repeating attract/repel "shells" out to forceRange, controlled
   // by how many wave "periods" fit in it — see step() for the exact formula.
-  const REQUIRED_ROLES = ['charge', 'mass', 'speed', 'energy', 'force', 'forceRange', 'periods', 'waveOffset'];
+  const REQUIRED_ROLES = ['charge', 'mass', 'speed', 'energy', 'force', 'forceRange', 'periods', 'waveOffset', 'phaseShift'];
   const DEFAULT_VARS = [
     { role: 'charge', name: 'charge', expr: 'rand(-1, 1)' },
     { role: 'mass',   name: 'mass',   expr: 'rand(0.5, 3)' },
@@ -82,9 +82,12 @@
     { role: 'periods', name: 'periods', expr: 'energy / 3' },
     // shifts the pairwise force wave up before it's rescaled back (see waveTerm()):
     // 0 = classic wave (can attract same charge in some shells), 1 = never flips sign
-    { role: 'waveOffset', name: 'waveOffset', expr: '1' }
+    { role: 'waveOffset', name: 'waveOffset', expr: '1' },
+    // horizontal counterpart to waveOffset: slides the wave sideways along distance,
+    // in units of one full period (0.5 = shift by half a period, wraps every 1.0)
+    { role: 'phaseShift', name: 'phaseShift', expr: '0' }
   ];
-  const ROLE_FALLBACK = { charge: 0, mass: 1, speed: 50, energy: 10, force: 1000, forceRange: 100, periods: 2, waveOffset: 0 };
+  const ROLE_FALLBACK = { charge: 0, mass: 1, speed: 50, energy: 10, force: 1000, forceRange: 100, periods: 2, waveOffset: 0, phaseShift: 0 };
 
   function normalizeVariables(arr) {
     const ok = Array.isArray(arr) && arr.length >= REQUIRED_ROLES.length
@@ -218,13 +221,14 @@
     const forceRange = clampNum(results.forceRange, 5, 4000, 100);
     const periods = clampNum(results.periods, -50, 50, 2);
     const waveOffset = clampNum(results.waveOffset, 0, 1, 0);
+    const phaseShift = clampNum(results.phaseShift, -1000, 1000, 0);
     const angle = rand(0, Math.PI * 2);
     const initSpeed = maxSpeed; // speed is always locked to the formula value — see step()
     return {
       id: nextId++,
       x: rand(0, W), y: rand(0, H),
       vx: Math.cos(angle) * initSpeed, vy: Math.sin(angle) * initSpeed,
-      charge, mass, maxSpeed, energy, force, forceRange, periods, waveOffset,
+      charge, mass, maxSpeed, energy, force, forceRange, periods, waveOffset, phaseShift,
       radius: PHOTON_RADIUS
     };
   }
@@ -246,6 +250,7 @@
       p.forceRange = clampNum(results.forceRange, 5, 4000, p.forceRange);
       p.periods = clampNum(results.periods, -50, 50, p.periods);
       p.waveOffset = clampNum(results.waveOffset, 0, 1, p.waveOffset);
+      p.phaseShift = clampNum(results.phaseShift, -1000, 1000, p.phaseShift);
     }
   }
 
@@ -331,8 +336,11 @@
   // touches zero, so the sign never flips (like charges always repel, opposite
   // charges always attract); values in between make the flip rarer without banning
   // it outright. Shared by step(), the reactor, and both force previews.
-  function waveTerm(d, range, periods, offset) {
-    const raw = Math.sin(2 * Math.PI * periods * d / range);
+  // phaseShift is waveOffset's horizontal counterpart: waveOffset moves the wave up
+  // (asymmetric — widens one lobe, narrows the other), phaseShift slides it sideways
+  // along distance instead, in units of one full period (0.5 = shift by half a period).
+  function waveTerm(d, range, periods, offset, phaseShift) {
+    const raw = Math.sin(2 * Math.PI * (periods * d / range + phaseShift));
     return (raw + offset) / (1 + offset);
   }
 
@@ -342,11 +350,11 @@
   // separate branch), and fades to exactly 0 at d = HARD_CORE_R, so there's no
   // jump at that boundary even when HARD_CORE_R is a large fraction of a very
   // small forceRange (previously the two branches didn't agree at the seam).
-  function pairForce(d, range, amp, periodsAvg, offsetAvg, chargeProduct) {
+  function pairForce(d, range, amp, periodsAvg, offsetAvg, phaseShiftAvg, chargeProduct) {
     if (d >= range) return 0;
     const phaseSign = chargeProduct < 0 ? 1 : -1;
     const envelope = 1 - d / range; // fades to 0 at the outer edge, no hard jump
-    let f = phaseSign * amp * waveTerm(d, range, periodsAvg, offsetAvg) * envelope;
+    let f = phaseSign * amp * waveTerm(d, range, periodsAvg, offsetAvg, phaseShiftAvg) * envelope;
     if (d < HARD_CORE_R) {
       const falloff = 1 - d / HARD_CORE_R;
       f += -HARD_CORE_K * falloff / (d + 2);
@@ -435,8 +443,9 @@
           const amp = (a.force + b.force) / 2;
           const periodsAvg = (a.periods + b.periods) / 2;
           const offsetAvg = (a.waveOffset + b.waveOffset) / 2;
+          const phaseShiftAvg = (a.phaseShift + b.phaseShift) / 2;
           const chargeProduct = a.charge * b.charge;
-          const f = pairForce(d, range, amp, periodsAvg, offsetAvg, chargeProduct); // + = attract, - = repel
+          const f = pairForce(d, range, amp, periodsAvg, offsetAvg, phaseShiftAvg, chargeProduct); // + = attract, - = repel
 
           const fx = ux * f, fy = uy * f;
           ax[i] += fx; ay[i] += fy;
@@ -637,6 +646,7 @@
     const amp = Math.max(1, ev.force);
     const periods = ev.periods;
     const offset = ev.waveOffset;
+    const phaseShift = ev.phaseShift;
     const maxRpx = range * scale;
     if (maxRpx <= 0) return;
     const grad = fctx.createRadialGradient(cx, cy, 0, cx, cy, maxRpx);
@@ -647,7 +657,7 @@
       // chargeProduct=-1 ("opposite charge"): raw>0 means attract (shown in baseColor),
       // raw<0 means repel (shown red) — includes the hard-core term so the ring
       // colors transition smoothly through d=HARD_CORE_R instead of snapping
-      const raw = pairForce(d, range, amp, periods, offset, -1) / amp;
+      const raw = pairForce(d, range, amp, periods, offset, phaseShift, -1) / amp;
       const alpha = Math.min(1, Math.abs(raw)) * 0.8;
       const stopColor = raw >= 0
         ? baseColor.replace(/,[^,]*\)$/, ',' + alpha.toFixed(3) + ')')
@@ -719,6 +729,7 @@
     const amp = (pos.force + neg.force) / 2;
     const periodsAvg = (pos.periods + neg.periods) / 2;
     const offsetAvg = (pos.waveOffset + neg.waveOffset) / 2;
+    const phaseShiftAvg = (pos.phaseShift + neg.phaseShift) / 2;
 
     const padL = 44, padR = 14, padT = 14, padB = 28;
     const plotW = w - padL - padR, plotH = h - padT - padB;
@@ -780,7 +791,7 @@
       const STEPS = 200;
       for (let i = 0; i <= STEPS; i++) {
         const d = (i / STEPS) * range;
-        const f = Math.max(-maxAmp, Math.min(maxAmp, pairForce(d, range, amp, periodsAvg, offsetAvg, chargeProduct)));
+        const f = Math.max(-maxAmp, Math.min(maxAmp, pairForce(d, range, amp, periodsAvg, offsetAvg, phaseShiftAvg, chargeProduct)));
         const x = xForD(d), y = yForF(f);
         if (i === 0) gctx.moveTo(x, y); else gctx.lineTo(x, y);
       }
@@ -1088,6 +1099,7 @@
       <div class="row"><span class="k">Force range</span><span class="v">${p.forceRange.toFixed(0)} px</span></div>
       <div class="row"><span class="k">Periods</span><span class="v">${p.periods.toFixed(2)}</span></div>
       <div class="row"><span class="k">Wave offset</span><span class="v">${p.waveOffset.toFixed(2)}</span></div>
+      <div class="row"><span class="k">Phase shift</span><span class="v">${p.phaseShift.toFixed(2)}</span></div>
       <div class="row"><span class="k">Position</span><span class="v">${p.x.toFixed(0)}, ${p.y.toFixed(0)}</span></div>
     `;
   }
@@ -1266,7 +1278,7 @@
       vx: Math.cos(angle) * src.maxSpeed, vy: Math.sin(angle) * src.maxSpeed,
       charge: src.charge, mass: src.mass, maxSpeed: src.maxSpeed,
       energy: src.energy, force: src.force, forceRange: src.forceRange, periods: src.periods,
-      waveOffset: src.waveOffset, radius: PHOTON_RADIUS, trail: []
+      waveOffset: src.waveOffset, phaseShift: src.phaseShift, radius: PHOTON_RADIUS, trail: []
     };
   }
 
@@ -1339,8 +1351,9 @@
         const amp = (a.force + b.force) / 2;
         const periodsAvg = (a.periods + b.periods) / 2;
         const offsetAvg = (a.waveOffset + b.waveOffset) / 2;
+        const phaseShiftAvg = (a.phaseShift + b.phaseShift) / 2;
         const chargeProduct = a.charge * b.charge;
-        const f = pairForce(d, range, amp, periodsAvg, offsetAvg, chargeProduct);
+        const f = pairForce(d, range, amp, periodsAvg, offsetAvg, phaseShiftAvg, chargeProduct);
         const fx = ux * f, fy = uy * f;
         ax[i] += fx; ay[i] += fy;
         ax[j] -= fx; ay[j] -= fy;
