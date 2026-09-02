@@ -1528,26 +1528,39 @@
       pts.push(pRow);
     }
 
-    ctx.lineWidth = 1;
-    for (let gy = 0; gy <= n; gy++) {
+    // filled cells first (the actual "heatmap" of charge-corresponding color), then
+    // a light neutral wireframe on top so the mesh shape still reads clearly
+    for (let gy = 0; gy < n; gy++) {
       for (let gx = 0; gx < n; gx++) {
-        const t = (heights[gy][gx] + heights[gy][gx + 1]) / (2 * REACTOR_HEIGHT_CLAMP);
-        ctx.strokeStyle = blendChargeColor(Math.max(-1, Math.min(1, t)), 0.4);
+        const avgH = (heights[gy][gx] + heights[gy][gx + 1] + heights[gy + 1][gx] + heights[gy + 1][gx + 1]) / 4;
+        const t = Math.max(-1, Math.min(1, avgH / REACTOR_HEIGHT_CLAMP));
+        ctx.fillStyle = blendChargeColor(t, 0.55);
         ctx.beginPath();
         ctx.moveTo(pts[gy][gx][0], pts[gy][gx][1]);
         ctx.lineTo(pts[gy][gx + 1][0], pts[gy][gx + 1][1]);
-        ctx.stroke();
+        ctx.lineTo(pts[gy + 1][gx + 1][0], pts[gy + 1][gx + 1][1]);
+        ctx.lineTo(pts[gy + 1][gx][0], pts[gy + 1][gx][1]);
+        ctx.closePath();
+        ctx.fill();
       }
     }
-    for (let gx = 0; gx <= n; gx++) {
-      for (let gy = 0; gy < n; gy++) {
-        const t = (heights[gy][gx] + heights[gy + 1][gx]) / (2 * REACTOR_HEIGHT_CLAMP);
-        ctx.strokeStyle = blendChargeColor(Math.max(-1, Math.min(1, t)), 0.4);
-        ctx.beginPath();
-        ctx.moveTo(pts[gy][gx][0], pts[gy][gx][1]);
-        ctx.lineTo(pts[gy + 1][gx][0], pts[gy + 1][gx][1]);
-        ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+    ctx.lineWidth = 1;
+    for (let gy = 0; gy <= n; gy++) {
+      ctx.beginPath();
+      for (let gx = 0; gx <= n; gx++) {
+        if (gx === 0) ctx.moveTo(pts[gy][gx][0], pts[gy][gx][1]);
+        else ctx.lineTo(pts[gy][gx][0], pts[gy][gx][1]);
       }
+      ctx.stroke();
+    }
+    for (let gx = 0; gx <= n; gx++) {
+      ctx.beginPath();
+      for (let gy = 0; gy <= n; gy++) {
+        if (gy === 0) ctx.moveTo(pts[gy][gx][0], pts[gy][gx][1]);
+        else ctx.lineTo(pts[gy][gx][0], pts[gy][gx][1]);
+      }
+      ctx.stroke();
     }
 
     // photons as "pins": a thin stalk down to the base plane, then the dot at
