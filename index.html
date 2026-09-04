@@ -29,6 +29,17 @@
     <button class="charge-btn active" data-charge="all">all</button>
   </div>
 
+  <div class="toolgroup" id="viewGroup">
+    <span class="tg-label">View</span>
+    <button class="tool-btn" id="mainViewToggle" title="Toggle 2D / 2.5D field-height view">2D</button>
+  </div>
+
+  <div class="toolgroup hidden" id="meshDensityRow">
+    <label for="meshDensity">Grid density</label>
+    <input type="range" id="meshDensity" min="0.5" max="3" step="0.1" value="1">
+    <span id="meshDensityVal">1.0x</span>
+  </div>
+
   <div id="hint">Click a photon = details &nbsp;•&nbsp; drag a rectangle = photon list</div>
 
   <button id="clearDataBtn" title="Deletes saved editor settings and window size/position, restoring the defaults">Clear data</button>
@@ -141,6 +152,24 @@
       <button class="tool-btn" data-color-mode="speed" title="White = fastest photon present, red = slowest — ranked by percentile, not raw value, so colors spread out evenly">Speed</button>
     </div>
     <label class="var-row"><input type="checkbox" id="glowToggle"> Glow around photons</label>
+
+    <div class="field-hint" style="margin-top:10px;">Which charges' field shows in the main 2.5D view (reactor windows have their own +/− next to their view toggle).</div>
+    <div class="toolgroup" id="fieldFilterGroup">
+      <button class="tool-btn charge-btn-size field-filter-btn active" data-sign="pos" title="Toggle field contribution from positive charges">+</button>
+      <button class="tool-btn charge-btn-size field-filter-btn active" data-sign="neg" title="Toggle field contribution from negative charges">−</button>
+    </div>
+  </div>
+</div>
+
+<!-- bottom: detected stable-orbit pairs -->
+<div class="window" id="winOrbits" style="bottom:60px; left:284px;">
+  <div class="window-header">
+    <span>Orbits</span>
+    <div class="window-btns"><button class="win-min" title="Minimize">–</button></div>
+  </div>
+  <div class="window-body">
+    <div class="field-hint">Pairs of photons whose distance has stayed roughly constant for a while — a sign they're locked into a stable orbit around each other.</div>
+    <div id="orbitsList"><div class="field-hint">No stable orbiting pairs detected yet.</div></div>
   </div>
 </div>
 
@@ -174,6 +203,7 @@
   <button class="dock-icon active" id="dockForce">Force preview</button>
   <button class="dock-icon active" id="dockForceGraph">Force graph</button>
   <button class="dock-icon active" id="dockFilter">Filter</button>
+  <button class="dock-icon active" id="dockOrbits">Orbits</button>
 </div>
 
 <script src="js/script.js"></script>

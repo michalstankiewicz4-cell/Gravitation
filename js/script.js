@@ -79,7 +79,10 @@
     { role: 'energy', name: 'energy', expr: '9' },
     { role: 'force',  name: 'force',  expr: 'abs(charge) * 5000' },
     { role: 'forceRange', name: 'forceRange', expr: 'abs(charge) * 50' },
-    { role: 'periods', name: 'periods', expr: 'energy / 3' },
+    // helper: how many wave periods energy gets divided into below — tune this
+    // instead of the literal divisor to control period count independently
+    { role: null, name: 'pcount', expr: '3' },
+    { role: 'periods', name: 'periods', expr: 'energy / pcount' },
     // shifts the pairwise force wave up before it's rescaled back (see waveTerm()):
     // 0 = classic wave (can attract same charge in some shells), 1 = never flips sign
     { role: 'waveOffset', name: 'waveOffset', expr: '1' },
@@ -286,6 +289,15 @@
   // ---------- color filter: how photons are colored ----------
   let colorMode = 'default'; // 'default' (flat ±/0) | 'intensity' (charge, scaled to range in play) | 'speed'
   let glowEnabled = false; // shadowBlur halo around photons, off by default (visual only, no physics effect)
+
+  // main simulation's own 2D/2.5D toggle — same tilted field-height visualization
+  // as the reactor windows (see the "2.5D view" section below render()), applied to
+  // the whole world instead of a hand-picked subset.
+  let mainViewMode = '2D'; // '2D' | '2.5D'
+  // which charges contribute to the main 2.5D field mesh — same idea as each
+  // reactor window's own +/- field-filter buttons (see r.fieldFilter), surfaced
+  // in the Filter panel since it's a filter on what's visible, not on physics
+  let mainFieldFilter = { pos: true, neg: true };
   let maxAbsChargeSeen = 1;
   function updateChargeRange() {
     let m = 0;
@@ -370,12 +382,128 @@
   const BRUSH_RADIUS = 160;    // reach of the "attract" brush
   const BRUSH_STRENGTH = 2600; // pull strength of the "attract" brush
 
+  // current force between two specific photons, right now — same formula as the
+  // pairwise step in step() above, just for one named pair instead of every
+  // neighbor. Used by the orbit-pair visualization (see visualizedOrbitPairs).
+  function currentPairForce(a, b) {
+    const dx = wrapDelta(b.x - a.x, W), dy = wrapDelta(b.y - a.y, H);
+    const d = Math.max(0.01, Math.sqrt(dx * dx + dy * dy));
+    const range = (a.forceRange + b.forceRange) / 2;
+    const amp = (a.force + b.force) / 2;
+    const periodsAvg = (a.periods + b.periods) / 2;
+    const offsetAvg = (a.waveOffset + b.waveOffset) / 2;
+    const phaseShiftAvg = (a.phaseShift + b.phaseShift) / 2;
+    const chargeProduct = a.charge * b.charge;
+    const f = pairForce(d, range, amp, periodsAvg, offsetAvg, phaseShiftAvg, chargeProduct);
+    // f: + = attract, - = repel (0 once d >= range). The rest are the exact
+    // averaged parameters that produced it, handed back so a caller (e.g.
+    // drawFieldHalo) can redraw the same physics at other distances too, instead
+    // of only ever getting this one instantaneous f.
+    return { d, range, f, amp, periodsAvg, offsetAvg, phaseShiftAvg, chargeProduct };
+  }
+
   let collisionCount = 0;
   let activeCollisionPairs = new Set();
+
+  // ---------- orbit detection ----------
+  // a pair counts as a "stable orbit" when their distance stays within
+  // ORBIT_VARIATION_MAX of its own average over a rolling ORBIT_WINDOW-second
+  // history of continuous interaction. Since every photon's speed is always
+  // locked to its own formula (see step() below), a pair that keeps a near-
+  // constant separation while both keep moving is, by construction, circling
+  // (or otherwise dancing around) a shared point — a reasonable proxy for
+  // "stable orbit" without having to reconstruct an actual orbital plane.
+  let simTime = 0; // accumulated sim seconds — frozen while paused, scaled by the speed multiplier
+  const ORBIT_WINDOW = 3;           // seconds of continuous-interaction history required
+  const ORBIT_VARIATION_MAX = 0.15; // max (maxD-minD)/avgD over that window to call it "stable"
+  const ORBIT_HISTORY_MAX = 20;     // capped log of past (ended) orbits, one slot per pair
+  // "idA_idB" (idA<idB) -> { samples: [{t,d}], stableSince, stableMinD, stableMaxD }
+  const orbitTracker = new Map();
+  // one entry per pair, not one per end event — a pair that flickers in and out of
+  // "stable" (e.g. drifting right at the edge of its interaction range) would
+  // otherwise spam a fresh history row every time it briefly re-stabilizes. Keyed
+  // the same way as orbitTracker: "idA_idB" -> { idA, idB, duration, minD, maxD, endedAt }
+  const orbitHistoryByPair = new Map();
+
+  function orbitPairKey(a, b) { return a.id < b.id ? a.id + '_' + b.id : b.id + '_' + a.id; }
+
+  // an orbit that was stable and just destabilized (or stopped interacting
+  // altogether) gets logged here so the panel can still show how it went —
+  // "(ended)" + how long it lasted + the min/max separation while it lasted.
+  // Only kept if it beats this pair's previous best — see orbitHistoryByPair above.
+  function finalizeOrbitEnd(key, rec) {
+    if (rec.stableSince === null) return;
+    const duration = simTime - rec.stableSince;
+    const existing = orbitHistoryByPair.get(key);
+    if (existing && existing.duration >= duration) return;
+    const [idA, idB] = key.split('_').map(Number);
+    orbitHistoryByPair.set(key, { idA, idB, duration, minD: rec.stableMinD, maxD: rec.stableMaxD, endedAt: simTime });
+    if (orbitHistoryByPair.size > ORBIT_HISTORY_MAX) {
+      let oldestKey = null, oldestT = Infinity;
+      for (const [k, v] of orbitHistoryByPair) { if (v.endedAt < oldestT) { oldestT = v.endedAt; oldestKey = k; } }
+      if (oldestKey !== null) orbitHistoryByPair.delete(oldestKey);
+    }
+  }
+
+  function updateOrbitTracking(a, b, d, seenPairs) {
+    const key = orbitPairKey(a, b);
+    seenPairs.add(key);
+    let rec = orbitTracker.get(key);
+    if (!rec) { rec = { samples: [], stableSince: null, stableMinD: 0, stableMaxD: 0 }; orbitTracker.set(key, rec); }
+    rec.samples.push({ t: simTime, d });
+    while (rec.samples.length > 1 && rec.samples[0].t < simTime - ORBIT_WINDOW) rec.samples.shift();
+
+    // not enough continuous history yet to judge — treat as not-yet-stable
+    if (simTime - rec.samples[0].t < ORBIT_WINDOW * 0.9) {
+      if (rec.stableSince !== null) finalizeOrbitEnd(key, rec);
+      rec.stableSince = null;
+      return;
+    }
+
+    let minD = Infinity, maxD = -Infinity, sum = 0;
+    for (const s of rec.samples) { if (s.d < minD) minD = s.d; if (s.d > maxD) maxD = s.d; sum += s.d; }
+    const avgD = sum / rec.samples.length;
+    const variation = avgD > 0 ? (maxD - minD) / avgD : 0;
+    if (variation <= ORBIT_VARIATION_MAX) {
+      if (rec.stableSince === null) { rec.stableSince = simTime; rec.stableMinD = d; rec.stableMaxD = d; }
+      else { rec.stableMinD = Math.min(rec.stableMinD, d); rec.stableMaxD = Math.max(rec.stableMaxD, d); }
+    } else {
+      if (rec.stableSince !== null) finalizeOrbitEnd(key, rec);
+      rec.stableSince = null;
+    }
+  }
+
+  function getStableOrbits() {
+    const result = [];
+    for (const [key, rec] of orbitTracker) {
+      if (rec.stableSince === null) continue;
+      const [idA, idB] = key.split('_').map(Number);
+      if (!findPhoton(idA) || !findPhoton(idB)) continue;
+      result.push({ idA, idB, duration: simTime - rec.stableSince, minD: rec.stableMinD, maxD: rec.stableMaxD });
+    }
+    result.sort((a, b) => b.duration - a.duration);
+    return result;
+  }
+
+  function formatDuration(sec) {
+    sec = Math.max(0, Math.floor(sec));
+    const m = Math.floor(sec / 60), s = sec % 60;
+    return m > 0 ? `${m}m ${s}s` : `${s}s`;
+  }
+
+  // roman numerals for labeling orbits on the force graph (I, II, III, ...) — only
+  // ever called with small counts (a handful of simultaneous orbits at most)
+  const ROMAN_TABLE = [[10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I']];
+  function toRoman(n) {
+    let s = '';
+    for (const [v, r] of ROMAN_TABLE) { while (n >= v) { s += r; n -= v; } }
+    return s;
+  }
 
   function step(dt) {
     const n = photons.length;
     if (n === 0) return;
+    simTime += dt;
     const ax = new Float64Array(n), ay = new Float64Array(n);
 
     // ---- spatial grid (keeps pairwise checks near O(n) instead of O(n^2)) ----
@@ -399,6 +527,7 @@
     }
 
     const newCollisionPairs = new Set();
+    const seenOrbitPairs = new Set();
 
     for (let i = 0; i < n; i++) {
       const a = photons[i];
@@ -438,6 +567,8 @@
 
           if (d >= range) continue;
 
+          updateOrbitTracking(a, b, d, seenOrbitPairs);
+
           const ux = dx / d, uy = dy / d;
           // one continuous wave out to "range" (force amplitude, wave count
           // "periods", and the range itself all come from the two photons' own
@@ -464,6 +595,16 @@
       if (!activeCollisionPairs.has(key)) collisionCount++;
     }
     activeCollisionPairs = newCollisionPairs;
+
+    // pairs that stopped interacting this frame are no longer a candidate orbit —
+    // drop their history instead of letting it stitch back together after a gap
+    // (finalizing first so a pair that was stable still lands in orbitHistory)
+    for (const [key, rec] of orbitTracker) {
+      if (!seenOrbitPairs.has(key)) {
+        finalizeOrbitEnd(key, rec);
+        orbitTracker.delete(key);
+      }
+    }
 
     // "attract" brush: while held, pull matching-charge photons toward the cursor
     if (currentTool === 'attract' && mouseDown) {
@@ -505,6 +646,173 @@
     }
   }
 
+  // ---------- main 2.5D view ----------
+  // Same tilted height-field look as the reactor windows (see fieldTerm/VIEW_* above
+  // renderReactor25D), but applied to the whole, possibly-large main world. The tilt
+  // warp is applied to the WORLD y-coordinate itself, around H/2, before the existing
+  // ctx.scale(zoom)/translate(-camX,-camY) transform in render() — so it rides along
+  // with zoom, pan, and the toroidal tile-wrap loop for free, no separate projection
+  // math needed for those.
+  // two-tier grid: a dim line every 50 world px, a brighter one every 100px — like
+  // graph paper, so the eye has a "real" square to gauge scale/warp against. Shared
+  // with the reactor windows' mesh (renderReactor25D) for the same look.
+  //
+  // IMPORTANT: this visible line spacing is kept separate from the sampling
+  // resolution used to actually compute the warp (see meshDensity below). Sampling
+  // only as often as the visible lines (i.e. one sample every 50px) was tried and
+  // looked broken — each grid point then has to answer for a whole 50px neighborhood
+  // of fast-moving photons, so it swings in big discrete steps between frames
+  // instead of deflecting smoothly ("skacze" instead of bending). Sampling stays
+  // fine-grained (see MESH_SAMPLE_CELL_BASE); only the choice of which of those fine
+  // lines get *stroked* is sparse, at the 50/100px spacing.
+  const MESH_LINE_MAJOR = 'rgba(255,255,255,0.28)';
+  const MESH_LINE_MINOR = 'rgba(255,255,255,0.10)';
+  const MESH_MINOR_SPACING = 50;  // world px between visible grid lines
+  const MESH_MAJOR_SPACING = 100; // world px between the brighter lines (every 2nd)
+  const MESH_SAMPLE_CELL_BASE = 12.5; // world px between height samples at meshDensity=1 — this is what actually needs to be dense for a smooth-looking bend
+  // live density knob (see the "Grid density" slider, shown while a 2.5D view is
+  // active) — 1 = the base density above; scales the sampling fineness (not the
+  // visible line spacing) of both the main mesh and every reactor window's mesh
+  let meshDensity = 1;
+
+  function worldTiltY(wy, h) {
+    return H / 2 + (wy - H / 2) * VIEW_TILT - h * VIEW_HEIGHT_SCALE;
+  }
+
+  // height also nudges the WORLD x-coordinate a little, so a bump displaces grid
+  // points sideways as well as up — without this, a mesh line running in the y
+  // direction (constant x) never has anything to shift it horizontally, so it stays
+  // a dead-straight vertical line no matter how tall the bump under it is (only the
+  // x-varying lines through the same bump would show the wave). The mild x-shift
+  // makes the warp read consistently in both mesh directions instead of one.
+  function worldTiltX(wx, h) {
+    return wx + h * VIEW_HEIGHT_SCALE_X;
+  }
+
+  // bins photons into a grid sized to the largest forceRange in play (same idea as
+  // step()'s physics grid) so fieldHeightAtBinned() only has to scan nearby photons
+  // instead of the whole (possibly thousands-strong) photon list per query.
+  function buildFieldBins(list, worldW, worldH) {
+    let maxRange = 0;
+    for (const p of list) if (p.forceRange > maxRange) maxRange = p.forceRange;
+    const cell = Math.max(50, maxRange + 20);
+    const cols = Math.max(1, Math.floor(worldW / cell));
+    const rows = Math.max(1, Math.floor(worldH / cell));
+    const cellW = worldW / cols, cellH = worldH / rows;
+    const bins = new Array(cols * rows);
+    for (let i = 0; i < bins.length; i++) bins[i] = [];
+    for (const p of list) {
+      const cx = Math.min(cols - 1, Math.floor(p.x / cellW));
+      const cy = Math.min(rows - 1, Math.floor(p.y / cellH));
+      bins[cy * cols + cx].push(p);
+    }
+    return { bins, cols, rows, cellW, cellH, worldW, worldH };
+  }
+
+  function fieldHeightAtBinned(wx, wy, bin) {
+    const { bins, cols, rows, cellW, cellH, worldW, worldH } = bin;
+    const cx = Math.min(cols - 1, Math.floor(wrap(wx, worldW) / cellW));
+    const cy = Math.min(rows - 1, Math.floor(wrap(wy, worldH) / cellH));
+    let h = 0;
+    for (let ddx = -1; ddx <= 1; ddx++) {
+      for (let ddy = -1; ddy <= 1; ddy++) {
+        const nx = ((cx + ddx) % cols + cols) % cols;
+        const ny = ((cy + ddy) % rows + rows) % rows;
+        const list = bins[ny * cols + nx];
+        for (let k = 0; k < list.length; k++) {
+          const p = list[k];
+          if (p.charge >= 0 ? !mainFieldFilter.pos : !mainFieldFilter.neg) continue;
+          const dx = wrapDelta(wx - p.x, worldW);
+          const dy = wrapDelta(wy - p.y, worldH);
+          const d = Math.max(0.01, Math.sqrt(dx * dx + dy * dy));
+          h += fieldTerm(d, p);
+        }
+      }
+    }
+    return Math.max(-VIEW_HEIGHT_CLAMP, Math.min(VIEW_HEIGHT_CLAMP, h));
+  }
+
+  // strokes a smooth curve through a row/column of grid points instead of a
+  // straight-segment polyline — quadratic-curving through each point's midpoint
+  // to its neighbor (a standard canvas smoothing trick) so a dense mesh reads as
+  // a continuous, fluid surface rather than a faceted wireframe of flat panels.
+  function strokeSmoothGridLine(c, pts) {
+    const n = pts.length;
+    if (n < 2) return;
+    c.beginPath();
+    c.moveTo(pts[0][0], pts[0][1]);
+    if (n === 2) {
+      c.lineTo(pts[1][0], pts[1][1]);
+    } else {
+      for (let i = 1; i < n - 1; i++) {
+        const [x, y] = pts[i];
+        const [nx, ny] = pts[i + 1];
+        c.quadraticCurveTo(x, y, (x + nx) / 2, (y + ny) / 2);
+      }
+      const [lx, ly] = pts[n - 1];
+      c.quadraticCurveTo(pts[n - 2][0], pts[n - 2][1], lx, ly);
+    }
+    c.stroke();
+  }
+
+  // raw field height can swing a lot from one frame to the next (photons are fast,
+  // and the force wave packs several periods into a short range — see fieldTerm),
+  // which read as the mesh visibly jerking/popping rather than deforming smoothly.
+  // Easing each grid point's displayed height toward its new target instead of
+  // snapping to it low-pass-filters that in time, independent of the cause — the
+  // mesh still tracks the field, just fluidly instead of jumping every frame.
+  const MESH_HEIGHT_SMOOTH = 0.25; // fraction of the way to the new target per frame
+  let mainMeshH = null, mainMeshCols = -1, mainMeshRows = -1;
+
+  // drawn only for the primary (untiled) world copy — at typical zoom levels that's
+  // the only one visible anyway, and it keeps mesh cost independent of zoom-out level.
+  function drawMainFieldMesh(bin) {
+    const cell = MESH_SAMPLE_CELL_BASE / meshDensity;
+    const cols = Math.max(2, Math.round(W / cell));
+    const rows = Math.max(2, Math.round(H / cell));
+    if (cols !== mainMeshCols || rows !== mainMeshRows) {
+      mainMeshCols = cols; mainMeshRows = rows;
+      mainMeshH = new Float64Array((cols + 1) * (rows + 1)); // reset on resize; a few frames to ease in is fine
+    }
+    const cellW = W / cols, cellH = H / rows;
+    // which fine sample lines fall on a visible 50px/100px world boundary
+    const minorStep = Math.max(1, Math.round(MESH_MINOR_SPACING / cellW));
+    const majorStep = minorStep * Math.round(MESH_MAJOR_SPACING / MESH_MINOR_SPACING);
+    const minorStepY = Math.max(1, Math.round(MESH_MINOR_SPACING / cellH));
+    const majorStepY = minorStepY * Math.round(MESH_MAJOR_SPACING / MESH_MINOR_SPACING);
+    const pts = [];
+    for (let gy = 0; gy <= rows; gy++) {
+      const pRow = [];
+      for (let gx = 0; gx <= cols; gx++) {
+        const wx = gx * cellW, wy = gy * cellH;
+        const idx = gy * (cols + 1) + gx;
+        const target = fieldHeightAtBinned(wx, wy, bin);
+        mainMeshH[idx] += (target - mainMeshH[idx]) * MESH_HEIGHT_SMOOTH;
+        const h = mainMeshH[idx];
+        pRow.push([worldTiltX(wx, h), worldTiltY(wy, h)]);
+      }
+      pts.push(pRow);
+    }
+
+    // smooth curves, no fill — sampled at MESH_SAMPLE_CELL_BASE spacing (dense) so
+    // the bend itself stays fluid, but only every minorStep/majorStep-th line is
+    // actually stroked, at the fixed 50px/100px visible spacing (see the comment
+    // above MESH_MINOR_SPACING for why sampling and drawing are split like this)
+    ctx.lineWidth = 0.75;
+    for (let gy = 0; gy <= rows; gy++) {
+      if (gy % minorStepY !== 0) continue;
+      ctx.strokeStyle = gy % majorStepY === 0 ? MESH_LINE_MAJOR : MESH_LINE_MINOR;
+      strokeSmoothGridLine(ctx, pts[gy]);
+    }
+    for (let gx = 0; gx <= cols; gx++) {
+      if (gx % minorStep !== 0) continue;
+      ctx.strokeStyle = gx % majorStep === 0 ? MESH_LINE_MAJOR : MESH_LINE_MINOR;
+      const col = [];
+      for (let gy = 0; gy <= rows; gy++) col.push(pts[gy][gx]);
+      strokeSmoothGridLine(ctx, col);
+    }
+  }
+
   // ---------- rendering ----------
   function render() {
     ctx.clearRect(0, 0, W, H);
@@ -528,15 +836,35 @@
     if (colorMode === 'intensity') updateChargeRange();
     else if (colorMode === 'speed') updateSpeedRange();
 
+    const view25D = mainViewMode === '2.5D';
+    const fieldBin = view25D ? buildFieldBins(photons, W, H) : null;
+    if (view25D) drawMainFieldMesh(fieldBin);
+
     for (const p of photons) {
       const isSelected = openInfoWindows.has(p.id);
       const isInList = listSelection.has(p.id);
       const color = photonColor(p, 0.95);
       if (glow) ctx.shadowColor = color;
-      ctx.fillStyle = color;
+      const h = view25D ? fieldHeightAtBinned(p.x, p.y, fieldBin) : 0;
       for (let tx = tileMinX; tx <= tileMaxX; tx++) {
         for (let ty = tileMinY; ty <= tileMaxY; ty++) {
-          const px = p.x + tx * W, py = p.y + ty * H;
+          const px = p.x + tx * W;
+          const rawPy = p.y + ty * H;
+          // photons stay on one flat level — only the grid mesh warps with the
+          // field; the stalk is just a visual indicator of the local deviation,
+          // drawn only for the primary tile, and never moves the ball itself
+          const py = view25D ? worldTiltY(rawPy, 0) : rawPy;
+
+          if (view25D && tx === 0 && ty === 0) {
+            ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(px, py);
+            ctx.lineTo(px, worldTiltY(rawPy, h));
+            ctx.stroke();
+          }
+
+          ctx.fillStyle = color;
           ctx.beginPath();
           ctx.arc(px, py, p.radius, 0, Math.PI * 2);
           ctx.fill();
@@ -552,6 +880,8 @@
       }
     }
     ctx.shadowBlur = 0;
+
+    drawOrbitVisualizations();
 
     if (dragging && rectActive && currentTool === 'select') {
       const r = normalizedRect();
@@ -608,6 +938,143 @@
     statAvgSpeed.textContent = (photons.length ? speedSum / photons.length : 0).toFixed(1) + ' px/s';
   }
 
+  // ---------- orbits panel: pairs flagged by updateOrbitTracking() in step() ----------
+  const orbitsList = document.getElementById('orbitsList');
+  let orbitsPanelTimer = 0;
+  const ORBITS_PANEL_REFRESH = 0.5; // seconds of real time between DOM rebuilds — duration only needs whole-second resolution anyway
+  const ORBIT_HISTORY_SHOWN = 5;    // most-recent ended orbits shown below the active ones
+
+  // pair keys ("idA_idB") whose force preview + connecting line are drawn on the
+  // main canvas every frame (see drawOrbitVisualizations() in render()) — toggled
+  // by each row's "eye" button, auto-dropped once the pair actually separates
+  // (stops interacting at all, not just "stable" — see pruneVisualizedOrbitPairs)
+  const visualizedOrbitPairs = new Set();
+
+  function orbitRangeText(minD, maxD) { return minD.toFixed(0) + '–' + maxD.toFixed(0) + 'px'; }
+
+  function updateOrbitsPanel(realDt) {
+    pruneVisualizedOrbitPairs();
+    orbitsPanelTimer += realDt;
+    if (orbitsPanelTimer < ORBITS_PANEL_REFRESH) return;
+    orbitsPanelTimer = 0;
+
+    const active = getStableOrbits().slice(0, 8);
+    const ended = Array.from(orbitHistoryByPair.values())
+      .sort((a, b) => b.endedAt - a.endedAt)
+      .slice(0, ORBIT_HISTORY_SHOWN);
+    if (!active.length && !ended.length) {
+      orbitsList.innerHTML = '<div class="field-hint">No stable orbiting pairs detected yet.</div>';
+      return;
+    }
+
+    let html = active.map(o => {
+      const key = orbitPairKey({ id: o.idA }, { id: o.idB });
+      const vizOn = visualizedOrbitPairs.has(key);
+      return `
+      <div class="row orbit-row" data-a="${o.idA}" data-b="${o.idB}" title="Click to select this pair">
+        <span class="k">#${o.idA} ↔ #${o.idB} <span class="orbit-range">${orbitRangeText(o.minD, o.maxD)}</span></span>
+        <span class="v">${formatDuration(o.duration)}</span>
+        <span class="orbit-actions">
+          <button class="orbit-action-btn orbit-center-btn" title="Center the map on this pair">⌖</button>
+          <button class="orbit-action-btn orbit-viz-btn${vizOn ? ' active' : ''}" title="Show force preview + connecting line on the map, until they separate">👁</button>
+        </span>
+      </div>`;
+    }).join('');
+    if (ended.length) {
+      html += '<div class="field-hint" style="margin:6px 0 2px">Recently ended</div>';
+      html += ended.map(o => `
+        <div class="row orbit-row ended" data-a="${o.idA}" data-b="${o.idB}" title="Click to select this pair">
+          <span class="k">#${o.idA} ↔ #${o.idB} <span class="orbit-range">${orbitRangeText(o.minD, o.maxD)}</span></span>
+          <span class="v">(ended) ${formatDuration(o.duration)}</span>
+        </div>`).join('');
+    }
+    orbitsList.innerHTML = html;
+  }
+
+  // a visualized pair keeps showing while they're still interacting at all (still
+  // in orbitTracker), not just while "stable" — so it survives the normal wobble
+  // in/out of stability, and only clears once step() actually drops the pair for
+  // being out of force range (see step()'s orbitTracker cleanup) or a photon is deleted
+  function pruneVisualizedOrbitPairs() {
+    for (const key of visualizedOrbitPairs) {
+      const [idA, idB] = key.split('_').map(Number);
+      if (!orbitTracker.has(key) || !findPhoton(idA) || !findPhoton(idB)) visualizedOrbitPairs.delete(key);
+    }
+  }
+
+  // pans the camera (no zoom change) so this pair's current midpoint lands in the
+  // center of the viewport — a one-off recenter, not a continuous follow
+  function centerCameraOnPair(idA, idB) {
+    const a = findPhoton(idA), b = findPhoton(idB);
+    if (!a || !b) return;
+    const dx = wrapDelta(b.x - a.x, W), dy = wrapDelta(b.y - a.y, H);
+    const midX = wrap(a.x + dx / 2, W), midY = wrap(a.y + dy / 2, H);
+    camX = midX - (W / zoom) / 2;
+    camY = midY - (H / zoom) / 2;
+  }
+
+  // event delegation: rows are rebuilt wholesale on every refresh above, so a
+  // single listener on the (never-replaced) container beats re-binding per row
+  orbitsList.addEventListener('click', (e) => {
+    const centerBtn = e.target.closest('.orbit-center-btn');
+    const vizBtn = e.target.closest('.orbit-viz-btn');
+    const row = e.target.closest('.orbit-row');
+    if (!row) return;
+    const idA = Number(row.dataset.a), idB = Number(row.dataset.b);
+    if (centerBtn) {
+      e.stopPropagation();
+      centerCameraOnPair(idA, idB);
+      return;
+    }
+    if (vizBtn) {
+      e.stopPropagation();
+      const key = orbitPairKey({ id: idA }, { id: idB });
+      if (visualizedOrbitPairs.has(key)) visualizedOrbitPairs.delete(key);
+      else visualizedOrbitPairs.add(key);
+      vizBtn.classList.toggle('active', visualizedOrbitPairs.has(key));
+      return;
+    }
+    showListPanel([idA, idB]);
+  });
+
+  // force preview + connecting line for every pair toggled on via the Orbits
+  // panel's eye button — drawn each frame in world space (called from inside
+  // render()'s zoom/pan transform), so it pans and zooms with everything else.
+  // Only drawn for the primary tile: orbiting pairs are always close together
+  // (within forceRange of each other), so the wrapped-short-path line below never
+  // needs the toroidal tile-repeat treatment the photons themselves get.
+  const ORBIT_ATTRACT_COLOR = 'rgba(69,130,255,ALPHA)';  // same blue as "opposite charges" elsewhere
+  const ORBIT_REPEL_COLOR = 'rgba(255,153,45,ALPHA)';    // same orange as "same charge" elsewhere
+  function drawOrbitVisualizations() {
+    if (visualizedOrbitPairs.size === 0) return;
+    for (const key of visualizedOrbitPairs) {
+      const [idA, idB] = key.split('_').map(Number);
+      const a = findPhoton(idA), b = findPhoton(idB);
+      if (!a || !b) continue;
+      const { range, f, amp, periodsAvg, offsetAvg, phaseShiftAvg, chargeProduct } = currentPairForce(a, b);
+      const dx = wrapDelta(b.x - a.x, W), dy = wrapDelta(b.y - a.y, H);
+      const bx = a.x + dx, by = a.y + dy; // b's position mirrored to the short path from a, so the line never crosses the whole map on a wrap
+      const intensity = range > 0 ? Math.max(0, Math.min(1, Math.abs(f) / (amp || 1))) : 0;
+      const color = (f >= 0 ? ORBIT_ATTRACT_COLOR : ORBIT_REPEL_COLOR).replace('ALPHA', (0.35 + 0.5 * intensity).toFixed(2));
+
+      // exact same gradient-ring halo as the standalone "Force preview" panel
+      // (see drawFieldHalo), but with these two photons' own real, current
+      // parameters and chargeProduct — not the panel's fixed +1/-1 reference —
+      // and drawn at world scale 1:1 (ctx is already zoom/pan-transformed), so the
+      // rings sit at their true forceRange distance instead of an approximation
+      drawFieldHalo(ctx, a.x, a.y, range, amp, periodsAvg, offsetAvg, phaseShiftAvg, chargeProduct, 1, colorForCharge(a.charge, 1));
+      drawFieldHalo(ctx, b.x, b.y, range, amp, periodsAvg, offsetAvg, phaseShiftAvg, chargeProduct, 1, colorForCharge(b.charge, 1));
+
+      // connecting line on top, thicker/brighter the stronger the current force
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5 + 2.5 * intensity;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(bx, by);
+      ctx.stroke();
+    }
+  }
+
   // ---------- stats panel settings: which rows are shown, persisted ----------
   const STATS_LS_KEY = 'photonSim.statVisibility.v1';
   const DEFAULT_STAT_VISIBILITY = { total: true, pos: true, neg: true, collisions: true, avgSpeed: false };
@@ -644,36 +1111,35 @@
   const fctx = forceCanvas.getContext('2d');
 
   // gradient halo showing the sinusoidal field as concentric rings: red = would
-  // repel a same-signed charge / photon's own color = would attract an opposite
-  // charge, fading with the same envelope used in step(). Shown as if meeting an
-  // opposite charge (phaseSign = +1) — the same-charge case is just this inverted.
-  function drawFieldHalo(cx, cy, ev, scale, baseColor) {
-    const range = ev.forceRange;
-    const amp = Math.max(1, ev.force);
-    const periods = ev.periods;
-    const offset = ev.waveOffset;
-    const phaseShift = ev.phaseShift;
+  // repel a same-signed charge / baseColor = would attract an opposite charge,
+  // fading with the same envelope used in step(). Generic over which canvas/scale/
+  // chargeProduct it's drawn with — used both by the Force preview panel (its own
+  // canvas, a fixed +1/-1 reference pair, pixel scale) and by the Orbits panel's
+  // per-pair map overlay (main canvas, the pair's own real parameters, world scale
+  // 1:1 — see drawOrbitVisualizations) so both read the exact same physics.
+  function drawFieldHalo(targetCtx, cx, cy, range, amp, periods, offset, phaseShift, chargeProduct, scale, baseColor) {
     const maxRpx = range * scale;
     if (maxRpx <= 0) return;
-    const grad = fctx.createRadialGradient(cx, cy, 0, cx, cy, maxRpx);
+    const grad = targetCtx.createRadialGradient(cx, cy, 0, cx, cy, maxRpx);
     const STEPS = 80; // fine steps needed to resolve the oscillation clearly
+    const safeAmp = Math.max(1, amp);
     for (let i = 0; i <= STEPS; i++) {
       const t = i / STEPS;
       const d = t * range;
-      // chargeProduct=-1 ("opposite charge"): raw>0 means attract (shown in baseColor),
-      // raw<0 means repel (shown red) — includes the hard-core term so the ring
-      // colors transition smoothly through d=HARD_CORE_R instead of snapping
-      const raw = pairForce(d, range, amp, periods, offset, phaseShift, -1) / amp;
+      // raw>0 means attract (shown in baseColor), raw<0 means repel (shown red) —
+      // includes the hard-core term so the ring colors transition smoothly through
+      // d=HARD_CORE_R instead of snapping
+      const raw = pairForce(d, range, safeAmp, periods, offset, phaseShift, chargeProduct) / safeAmp;
       const alpha = Math.min(1, Math.abs(raw)) * 0.8;
       const stopColor = raw >= 0
         ? baseColor.replace(/,[^,]*\)$/, ',' + alpha.toFixed(3) + ')')
         : 'rgba(255,80,80,' + alpha.toFixed(3) + ')';
       grad.addColorStop(t, stopColor);
     }
-    fctx.fillStyle = grad;
-    fctx.beginPath();
-    fctx.arc(cx, cy, maxRpx, 0, Math.PI * 2);
-    fctx.fill();
+    targetCtx.fillStyle = grad;
+    targetCtx.beginPath();
+    targetCtx.arc(cx, cy, maxRpx, 0, Math.PI * 2);
+    targetCtx.fill();
   }
 
   function renderForcePreview() {
@@ -693,8 +1159,8 @@
     const maxRange = Math.max(pos.forceRange, neg.forceRange, 1);
     const scale = avail / maxRange; // same scale for both -> proportions preserved
 
-    drawFieldHalo(cxPos, cy, pos, scale, colorForCharge(1, 1));
-    drawFieldHalo(cxNeg, cy, neg, scale, colorForCharge(-1, 1));
+    drawFieldHalo(fctx, cxPos, cy, pos.forceRange, pos.force, pos.periods, pos.waveOffset, pos.phaseShift, -1, scale, colorForCharge(1, 1));
+    drawFieldHalo(fctx, cxNeg, cy, neg.forceRange, neg.force, neg.periods, neg.waveOffset, neg.phaseShift, -1, scale, colorForCharge(-1, 1));
 
     fctx.fillStyle = colorForCharge(1, 1);
     fctx.beginPath(); fctx.arc(cxPos, cy, 3, 0, Math.PI * 2); fctx.fill();
@@ -834,6 +1300,36 @@
     gctx.fillRect(w - 150, 20, 10, 10);
     gctx.fillStyle = '#c7cfe4';
     gctx.fillText('same charge', w - 136, 29);
+
+    // mark currently-active stable orbits (see getStableOrbits() in step()) at the
+    // distance they're actually holding — a live tie-in between "the force curve
+    // says this distance should be a stable shell" and "yes, something's parked there"
+    const orbits = getStableOrbits().slice(0, 8);
+    gctx.font = '10px sans-serif';
+    gctx.textAlign = 'center';
+    const labelY = padT + 9; // just inside the top edge, above where the curves usually sit
+    orbits.forEach((o, i) => {
+      const d = (o.minD + o.maxD) / 2;
+      if (d > range) return; // outside this chart's ±1-charge reference scale
+      const x = xForD(d);
+      gctx.strokeStyle = 'rgba(255,210,80,0.8)';
+      gctx.setLineDash([2, 2]);
+      gctx.lineWidth = 1;
+      gctx.beginPath();
+      gctx.moveTo(x, padT);
+      gctx.lineTo(x, h - padB);
+      gctx.stroke();
+      gctx.setLineDash([]);
+
+      // small solid backing behind the numeral so it stays legible over the curves
+      const label = toRoman(i + 1);
+      const labelW = gctx.measureText(label).width;
+      gctx.fillStyle = 'rgba(5,6,10,0.85)';
+      gctx.fillRect(x - labelW / 2 - 2, labelY - 8, labelW + 4, 11);
+      gctx.fillStyle = 'rgba(255,210,80,0.95)';
+      gctx.fillText(label, x, labelY);
+    });
+    gctx.textAlign = 'left';
   }
 
   // ---------- run loop ----------
@@ -848,6 +1344,7 @@
     render();
     updateInfoPanelIfOpen();
     updateStats();
+    updateOrbitsPanel(dt);
     updateZoomIndicator();
     renderForcePreview();
     renderForceGraph();
@@ -1337,6 +1834,11 @@
   function makeReactorPhoton(src) {
     const angle = rand(0, Math.PI * 2);
     return {
+      // keeps the original photon's id so selecting a reactor clone selects the
+      // real, still-live photon back in the main sim — see the reactor canvas'
+      // click/drag handlers in openReactor(), which feed these ids straight into
+      // selectPhoton()/showListPanel(), reusing the exact same list/info windows.
+      id: src.id,
       x: rand(0, REACTOR_SIZE), y: rand(0, REACTOR_SIZE),
       vx: Math.cos(angle) * src.maxSpeed, vy: Math.sin(angle) * src.maxSpeed,
       charge: src.charge, mass: src.mass, maxSpeed: src.maxSpeed,
@@ -1349,6 +1851,7 @@
     const i = reactors.indexOf(reactor);
     if (i === -1) return;
     if (reactor.el._resizeObserver) reactor.el._resizeObserver.disconnect();
+    if (reactor.sel && reactor.sel.cleanup) reactor.sel.cleanup();
     reactor.el.remove();
     reactors.splice(i, 1);
     delete windowState[reactor.el.id];
@@ -1370,6 +1873,8 @@
         <span>Reactor</span>
         <div class="window-btns">
           <button class="reactor-view" title="Toggle 2D / 2.5D view">2D</button>
+          <button class="reactor-field-toggle active" data-sign="1" title="Toggle field from positive-charge photons">+</button>
+          <button class="reactor-field-toggle active" data-sign="-1" title="Toggle field from negative-charge photons">−</button>
           <button class="reactor-clear" title="Clear trails">🧹</button>
           <button class="win-min" title="Minimize">–</button>
           <button class="win-close" title="Close">✕</button>
@@ -1380,7 +1885,7 @@
     document.body.appendChild(el);
 
     const canvas = el.querySelector('canvas');
-    const reactor = { el, ctx: canvas.getContext('2d'), photons: srcPhotons.map(makeReactorPhoton), mode: '2D' };
+    const reactor = { el, ctx: canvas.getContext('2d'), photons: srcPhotons.map(makeReactorPhoton), mode: '2D', fieldFilter: { pos: true, neg: true } };
     reactors.push(reactor);
 
     makeDraggable(el);
@@ -1395,6 +1900,78 @@
       viewBtn.textContent = reactor.mode;
       viewBtn.classList.toggle('active', reactor.mode === '2.5D');
     });
+    el.querySelectorAll('.reactor-field-toggle').forEach(btn => {
+      const key = btn.dataset.sign === '1' ? 'pos' : 'neg';
+      btn.addEventListener('click', () => {
+        reactor.fieldFilter[key] = !reactor.fieldFilter[key];
+        btn.classList.toggle('active', reactor.fieldFilter[key]);
+      });
+    });
+
+    canvas.title = 'Click a photon = details • drag a rectangle = photon list';
+    wireReactorSelection(reactor, canvas);
+  }
+
+  // click/drag select on a reactor's own canvas, mirroring the main canvas' "select"
+  // brush (see the mousedown/mousemove/mouseup block near the bottom of the file).
+  // Reactor photons carry the original photon's id (see makeReactorPhoton), so the
+  // ids collected here feed straight into the existing selectPhoton()/showListPanel()
+  // — same info windows, same list window, no reactor-specific UI needed.
+  function wireReactorSelection(reactor, canvas) {
+    const sel = reactor.sel = { dragging: false, active: false, x0: 0, y0: 0, x1: 0, y1: 0 };
+
+    function pointFromEvent(e) {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: (e.clientX - rect.left) * (REACTOR_SIZE / rect.width),
+        y: (e.clientY - rect.top) * (REACTOR_SIZE / rect.height)
+      };
+    }
+
+    function onMouseDown(e) {
+      sel.dragging = true; sel.active = false;
+      const pt = pointFromEvent(e);
+      sel.x0 = sel.x1 = pt.x; sel.y0 = sel.y1 = pt.y;
+      e.preventDefault();
+    }
+    function onMouseMove(e) {
+      if (!sel.dragging) return;
+      const pt = pointFromEvent(e);
+      sel.x1 = pt.x; sel.y1 = pt.y;
+      if (!sel.active && Math.hypot(sel.x1 - sel.x0, sel.y1 - sel.y0) > DRAG_THRESHOLD) sel.active = true;
+    }
+    function onMouseUp() {
+      if (!sel.dragging) return;
+      sel.dragging = false;
+      if (sel.active) {
+        const lo = { x: Math.min(sel.x0, sel.x1), y: Math.min(sel.y0, sel.y1) };
+        const hi = { x: Math.max(sel.x0, sel.x1), y: Math.max(sel.y0, sel.y1) };
+        const ids = [];
+        for (const p of reactor.photons) {
+          const [sx, sy] = reactorPhotonScreenPos(reactor, p);
+          if (sx >= lo.x && sx <= hi.x && sy >= lo.y && sy <= hi.y) ids.push(p.id);
+        }
+        showListPanel(ids);
+      } else {
+        let best = null, bestD = Infinity;
+        for (const p of reactor.photons) {
+          const [sx, sy] = reactorPhotonScreenPos(reactor, p);
+          const d = Math.hypot(sx - sel.x0, sy - sel.y0);
+          if (d < p.radius + 6 && d < bestD) { best = p; bestD = d; }
+        }
+        if (best) selectPhoton(best.id);
+      }
+      sel.active = false;
+    }
+
+    canvas.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    sel.cleanup = () => {
+      canvas.removeEventListener('mousedown', onMouseDown);
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
   }
 
   // same pairwise sine-wave force law as the main step() (see there for the physics
@@ -1449,6 +2026,39 @@
     }
   }
 
+  // screen-space position of a photon's ball as actually drawn, in either view mode
+  // (2.5D keeps balls on a flat level — see renderReactor25D) — shared by rendering
+  // and by the click/drag hit-testing in wireReactorSelection() so "what you see is
+  // what you can select" holds in both modes.
+  function reactorPhotonScreenPos(r, p) {
+    return r.mode === '2.5D' ? reactorProject(p.x, p.y, 0) : [p.x, p.y];
+  }
+
+  function drawReactorSelectionOverlay(r) {
+    const ctx = r.ctx;
+    for (const p of r.photons) {
+      const isSelected = openInfoWindows.has(p.id);
+      const isInList = listSelection.has(p.id);
+      if (!isSelected && !isInList) continue;
+      const [sx, sy] = reactorPhotonScreenPos(r, p);
+      ctx.beginPath();
+      ctx.arc(sx, sy, p.radius + (isSelected ? 5 : 3), 0, Math.PI * 2);
+      ctx.strokeStyle = isSelected ? '#ffffff' : 'rgba(255,255,255,0.55)';
+      ctx.lineWidth = isSelected ? 1.5 : 1;
+      ctx.stroke();
+    }
+    const sel = r.sel;
+    if (sel && sel.dragging && sel.active) {
+      const x = Math.min(sel.x0, sel.x1), y = Math.min(sel.y0, sel.y1);
+      const w = Math.abs(sel.x1 - sel.x0), h = Math.abs(sel.y1 - sel.y0);
+      ctx.fillStyle = 'rgba(120,160,255,0.12)';
+      ctx.strokeStyle = 'rgba(160,190,255,0.7)';
+      ctx.lineWidth = 1;
+      ctx.fillRect(x, y, w, h);
+      ctx.strokeRect(x, y, w, h);
+    }
+  }
+
   function renderReactor2D(r) {
     const ctx = r.ctx;
     ctx.clearRect(0, 0, REACTOR_SIZE, REACTOR_SIZE);
@@ -1477,35 +2087,63 @@
       ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
       ctx.fill();
     }
+    drawReactorSelectionOverlay(r);
   }
 
   // ---------- 2.5D view: a wireframe mesh warped by the same force wave that
   // governs the photons, viewed from a tilted angle so the undulation reads as
-  // height. Purely a visualization — stepReactor()'s physics is untouched.
-  const REACTOR_GRID_N = 16;       // mesh cells per axis
-  const REACTOR_TILT = 0.55;       // vertical foreshortening simulating the tilt
-  const REACTOR_HEIGHT_SCALE = 16; // px of screen rise per unit of field height
-  const REACTOR_HEIGHT_CLAMP = 3;  // caps the field sum so overlapping photons don't fly off-canvas
+  // height. Purely a visualization — physics (stepReactor()/step()) is untouched.
+  // Shared by both the reactor windows and the main simulation's own 2.5D toggle
+  // (see mainViewMode / drawMainFieldMesh() below).
+  const REACTOR_GRID_N_BASE = 56; // reactor mesh cells per axis at meshDensity=1 (reactor is a fixed small canvas)
+  const REACTOR_GRID_N_MIN = 10, REACTOR_GRID_N_MAX = 160; // clamp so the density slider can't make it degenerate or too costly
+  // was 0.55 (squishing the flat plane into a band around the vertical center) —
+  // that meant the board/reactor only ever rendered into the middle ~55% of the
+  // canvas height, leaving the rest empty, with anything near the world's Y edges
+  // squeezed toward that same band while still needing its full range to fit,
+  // reading as balls "sticking out" past the grid. 1 = no artificial squish, the
+  // flat (h=0) plane maps 1:1 onto the canvas; the 3D look now comes only from the
+  // height-based vertical/sideways offset (worldTiltY/worldTiltX), not this.
+  const VIEW_TILT = 1;
+  const VIEW_HEIGHT_SCALE = 16;   // px of screen rise per unit of field height
+  const VIEW_HEIGHT_SCALE_X = 8;  // px of sideways shift per unit of field height (see worldTiltX)
+  const VIEW_HEIGHT_CLAMP = 3;    // caps the field sum so overlapping photons don't fly off-canvas
 
-  // net "field height" at a point: same wave shape (waveTerm) and envelope as the
-  // real pairwise force, summed over every photon and signed by charge — not a real
+  // one photon's contribution to the field height at distance d — same wave shape
+  // (waveTerm) and envelope as the real pairwise force, signed by charge. Not a real
   // physical potential, just a visual stand-in for "how wavy the field is here".
-  function reactorFieldHeight(wx, wy, photons) {
+  function fieldTerm(d, p) {
+    if (d >= p.forceRange) return 0;
+    const envelope = 1 - d / p.forceRange;
+    const sign = p.charge >= 0 ? 1 : -1;
+    return sign * waveTerm(d, p.forceRange, p.periods, p.waveOffset, p.phaseShift) * envelope;
+  }
+
+  function reactorFieldHeight(wx, wy, photons, filter) {
     let h = 0;
     for (const p of photons) {
+      if (p.charge >= 0 ? !filter.pos : !filter.neg) continue;
       const dx = wrapDelta(wx - p.x, REACTOR_SIZE);
       const dy = wrapDelta(wy - p.y, REACTOR_SIZE);
       const d = Math.max(0.01, Math.sqrt(dx * dx + dy * dy));
-      if (d >= p.forceRange) continue;
-      const envelope = 1 - d / p.forceRange;
-      const sign = p.charge >= 0 ? 1 : -1;
-      h += sign * waveTerm(d, p.forceRange, p.periods, p.waveOffset, p.phaseShift) * envelope;
+      h += fieldTerm(d, p);
     }
-    return Math.max(-REACTOR_HEIGHT_CLAMP, Math.min(REACTOR_HEIGHT_CLAMP, h));
+    return Math.max(-VIEW_HEIGHT_CLAMP, Math.min(VIEW_HEIGHT_CLAMP, h));
   }
 
+  // ball position and the deviation stalk both use this — purely vertical, so the
+  // stalk always drops straight down onto the (sideways-warped) mesh below it
   function reactorProject(wx, wy, h) {
-    return [wx, REACTOR_SIZE / 2 + (wy - REACTOR_SIZE / 2) * REACTOR_TILT - h * REACTOR_HEIGHT_SCALE];
+    return [wx, REACTOR_SIZE / 2 + (wy - REACTOR_SIZE / 2) * VIEW_TILT - h * VIEW_HEIGHT_SCALE];
+  }
+
+  // mesh grid points only: same vertical tilt as reactorProject, plus the sideways
+  // nudge from worldTiltX so the mesh itself warps in both directions (rhomboid-
+  // looking bumps) — see worldTiltX's comment for why the vertical-only version
+  // above can't show that on its own
+  function reactorProjectMesh(wx, wy, h) {
+    const [, y] = reactorProject(wx, wy, h);
+    return [worldTiltX(wx, h), y];
   }
 
   function renderReactor25D(r) {
@@ -1514,72 +2152,62 @@
     ctx.fillStyle = '#05060a';
     ctx.fillRect(0, 0, REACTOR_SIZE, REACTOR_SIZE);
 
-    const n = REACTOR_GRID_N, cell = REACTOR_SIZE / n;
-    const heights = [], pts = [];
+    const n = Math.round(Math.min(REACTOR_GRID_N_MAX, Math.max(REACTOR_GRID_N_MIN, REACTOR_GRID_N_BASE * meshDensity)));
+    const cell = REACTOR_SIZE / n;
+    // eased per-cell heights, persisted on the reactor itself (see MESH_HEIGHT_SMOOTH's
+    // comment above drawMainFieldMesh — same jerk-vs-fluid fix, one buffer per window).
+    // Re-sized (losing the eased state, same as a resize) whenever the density
+    // slider changes n out from under this window.
+    if (!r.meshH || r.meshN !== n) { r.meshH = new Float64Array((n + 1) * (n + 1)); r.meshN = n; }
+    const pts = [];
     for (let gy = 0; gy <= n; gy++) {
-      const hRow = [], pRow = [];
+      const pRow = [];
       for (let gx = 0; gx <= n; gx++) {
         const wx = gx * cell, wy = gy * cell;
-        const h = reactorFieldHeight(wx, wy, r.photons);
-        hRow.push(h);
-        pRow.push(reactorProject(wx, wy, h));
+        const idx = gy * (n + 1) + gx;
+        const target = reactorFieldHeight(wx, wy, r.photons, r.fieldFilter);
+        r.meshH[idx] += (target - r.meshH[idx]) * MESH_HEIGHT_SMOOTH;
+        pRow.push(reactorProjectMesh(wx, wy, r.meshH[idx]));
       }
-      heights.push(hRow);
       pts.push(pRow);
     }
 
-    // filled cells first (the actual "heatmap" of charge-corresponding color), then
-    // a light neutral wireframe on top so the mesh shape still reads clearly
-    for (let gy = 0; gy < n; gy++) {
-      for (let gx = 0; gx < n; gx++) {
-        const avgH = (heights[gy][gx] + heights[gy][gx + 1] + heights[gy + 1][gx] + heights[gy + 1][gx + 1]) / 4;
-        const t = Math.max(-1, Math.min(1, avgH / REACTOR_HEIGHT_CLAMP));
-        ctx.fillStyle = blendChargeColor(t, 0.55);
-        ctx.beginPath();
-        ctx.moveTo(pts[gy][gx][0], pts[gy][gx][1]);
-        ctx.lineTo(pts[gy][gx + 1][0], pts[gy][gx + 1][1]);
-        ctx.lineTo(pts[gy + 1][gx + 1][0], pts[gy + 1][gx + 1][1]);
-        ctx.lineTo(pts[gy + 1][gx][0], pts[gy + 1][gx][1]);
-        ctx.closePath();
-        ctx.fill();
-      }
-    }
-    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
-    ctx.lineWidth = 1;
+    // smooth curves, no fill — a dense mesh of fluid lines reads the warp shape
+    // more clearly than a faceted polyline or a solid heatmap would at this spacing.
+    // Every 2nd line drawn brighter, same two-tier look as drawMainFieldMesh.
+    ctx.lineWidth = 0.75;
     for (let gy = 0; gy <= n; gy++) {
-      ctx.beginPath();
-      for (let gx = 0; gx <= n; gx++) {
-        if (gx === 0) ctx.moveTo(pts[gy][gx][0], pts[gy][gx][1]);
-        else ctx.lineTo(pts[gy][gx][0], pts[gy][gx][1]);
-      }
-      ctx.stroke();
+      ctx.strokeStyle = gy % 2 === 0 ? MESH_LINE_MAJOR : MESH_LINE_MINOR;
+      strokeSmoothGridLine(ctx, pts[gy]);
     }
     for (let gx = 0; gx <= n; gx++) {
-      ctx.beginPath();
-      for (let gy = 0; gy <= n; gy++) {
-        if (gy === 0) ctx.moveTo(pts[gy][gx][0], pts[gy][gx][1]);
-        else ctx.lineTo(pts[gy][gx][0], pts[gy][gx][1]);
-      }
-      ctx.stroke();
+      ctx.strokeStyle = gx % 2 === 0 ? MESH_LINE_MAJOR : MESH_LINE_MINOR;
+      const col = [];
+      for (let gy = 0; gy <= n; gy++) col.push(pts[gy][gx]);
+      strokeSmoothGridLine(ctx, col);
     }
 
     // photons stay on one flat level — only the stalk moves up/down to show the
     // local field deviation, so the balls themselves don't bounce around
     for (const p of r.photons) {
-      const h = reactorFieldHeight(p.x, p.y, r.photons);
+      const ownSignVisible = p.charge >= 0 ? r.fieldFilter.pos : r.fieldFilter.neg;
+      const h = reactorFieldHeight(p.x, p.y, r.photons, r.fieldFilter);
       const [bx, by] = reactorProject(p.x, p.y, 0);
-      const [tx, ty] = reactorProject(p.x, p.y, h);
-      ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(bx, by);
-      ctx.lineTo(tx, ty);
-      ctx.stroke();
+      if (ownSignVisible) {
+        const [tx, ty] = reactorProject(p.x, p.y, h);
+        ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(bx, by);
+        ctx.lineTo(tx, ty);
+        ctx.stroke();
+      }
       ctx.fillStyle = photonColor(p, 0.95);
       ctx.beginPath();
       ctx.arc(bx, by, p.radius + 0.5, 0, Math.PI * 2);
       ctx.fill();
     }
+    drawReactorSelectionOverlay(r);
   }
 
   function renderReactor(r) {
@@ -1719,8 +2347,10 @@
   const dockForceGraph = document.getElementById('dockForceGraph');
   const winFilter = document.getElementById('winFilter');
   const dockFilter = document.getElementById('dockFilter');
+  const winOrbits = document.getElementById('winOrbits');
+  const dockOrbits = document.getElementById('dockOrbits');
 
-  [ [winStats, dockStats], [winEditor, dockEditor], [winForce, dockForce], [winForceGraph, dockForceGraph], [winFilter, dockFilter] ].forEach(([win, dockBtn]) => {
+  [ [winStats, dockStats], [winEditor, dockEditor], [winForce, dockForce], [winForceGraph, dockForceGraph], [winFilter, dockFilter], [winOrbits, dockOrbits] ].forEach(([win, dockBtn]) => {
     makeDraggable(win);
     win.querySelector('.win-min').addEventListener('click', () => minimizeWin(win, dockBtn));
     dockBtn.addEventListener('click', () => toggleWin(win, dockBtn));
@@ -1815,6 +2445,32 @@
   const glowToggle = document.getElementById('glowToggle');
   glowToggle.checked = glowEnabled;
   glowToggle.addEventListener('change', () => { glowEnabled = glowToggle.checked; });
+
+  // which charges feed the main view's 2.5D field mesh (mainFieldFilter) — mirrors
+  // each reactor window's own +/- field toggle, scoped to #fieldFilterGroup so it
+  // doesn't get swept up by the unrelated (unscoped) .charge-btn wiring above
+  const fieldFilterButtons = document.querySelectorAll('#fieldFilterGroup .field-filter-btn');
+  fieldFilterButtons.forEach(b => b.addEventListener('click', () => {
+    const key = b.dataset.sign === 'pos' ? 'pos' : 'neg';
+    mainFieldFilter[key] = !mainFieldFilter[key];
+    b.classList.toggle('active', mainFieldFilter[key]);
+  }));
+
+  // ---------- main 2D/2.5D view toggle ----------
+  const mainViewToggleBtn = document.getElementById('mainViewToggle');
+  const meshDensityRow = document.getElementById('meshDensityRow');
+  const meshDensitySlider = document.getElementById('meshDensity');
+  const meshDensityVal = document.getElementById('meshDensityVal');
+  mainViewToggleBtn.addEventListener('click', () => {
+    mainViewMode = mainViewMode === '2D' ? '2.5D' : '2D';
+    mainViewToggleBtn.textContent = mainViewMode;
+    mainViewToggleBtn.classList.toggle('active', mainViewMode === '2.5D');
+    meshDensityRow.classList.toggle('hidden', mainViewMode !== '2.5D');
+  });
+  meshDensitySlider.addEventListener('input', () => {
+    meshDensity = Number(meshDensitySlider.value);
+    meshDensityVal.textContent = meshDensity.toFixed(1) + 'x';
+  });
 
   // ---------- spawning (used by the "spawn" brush) ----------
   function spawnPhotonAt(x, y) {

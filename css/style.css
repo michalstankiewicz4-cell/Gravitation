@@ -25,6 +25,9 @@
   #speedRow { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #b7c0d8; }
   #speedRow input[type=range] { width: 140px; }
   #speedVal { min-width: 34px; display: inline-block; }
+  #meshDensityRow { font-size: 13px; color: #b7c0d8; }
+  #meshDensityRow input[type=range] { width: 110px; }
+  #meshDensityVal { min-width: 34px; display: inline-block; }
   #hint { margin-left: auto; font-size: 12px; color: #6c7690; }
   #clearDataBtn {
     background: #3a1c1c; color: #ffb4b4; border: 1px solid rgba(255,107,107,0.35);
@@ -40,6 +43,7 @@
   .tool-btn:hover, .charge-btn:hover { background: #232b42; }
   .tool-btn.active, .charge-btn.active { background: #3a4a7a; border-color: #6c85c9; color: #fff; box-shadow: 0 0 0 1px #6c85c9; }
   .charge-btn { padding: 6px 10px; min-width: 30px; text-align: center; }
+  .charge-btn-size { padding: 6px 10px; min-width: 30px; text-align: center; }
 
   /* --- floating windows: draggable, minimizable --- */
   .window {
@@ -71,12 +75,30 @@
   .window-btns button:hover { color: #fff; background: rgba(255,255,255,0.08); }
   .reactor-view { font-size: 10px !important; font-weight: 600; }
   .reactor-view.active { color: #fff; background: rgba(108,133,201,0.35); }
+  .reactor-field-toggle { font-size: 12px !important; font-weight: 700; }
+  .reactor-field-toggle[data-sign="1"].active { color: #fff; background: rgba(255,153,45,0.35); }
+  .reactor-field-toggle[data-sign="-1"].active { color: #fff; background: rgba(69,130,255,0.35); }
+  .field-filter-btn.active[data-sign="pos"] { color: #fff; background: rgba(255,153,45,0.35); border-color: rgba(255,153,45,0.6); box-shadow: none; }
+  .field-filter-btn.active[data-sign="neg"] { color: #fff; background: rgba(69,130,255,0.35); border-color: rgba(69,130,255,0.6); box-shadow: none; }
   .window-body { padding: 10px 12px; overflow-y: auto; flex: 1 1 auto; min-height: 0; }
 
   .row { display: flex; justify-content: space-between; padding: 3px 0; gap: 12px; }
   .row .k { color: #8b93ad; }
   .row .v { font-variant-numeric: tabular-nums; }
   .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+
+  #winOrbits { width: 260px; }
+  .orbit-row { cursor: pointer; margin: 0 -12px; padding: 3px 12px; }
+  .orbit-row:hover { background: rgba(255,255,255,0.06); }
+  .orbit-row.ended { opacity: 0.6; }
+  .orbit-range { color: #6c7690; font-size: 11px; }
+  .orbit-actions { display: flex; gap: 4px; flex-shrink: 0; align-items: center; }
+  .orbit-action-btn {
+    background: none; border: 1px solid rgba(255,255,255,0.15); color: #c7cfe4;
+    border-radius: 4px; padding: 1px 6px; font-size: 12px; line-height: 1.5; cursor: pointer;
+  }
+  .orbit-action-btn:hover { background: rgba(255,255,255,0.08); color: #fff; }
+  .orbit-action-btn.active { background: rgba(108,133,201,0.35); border-color: #6c85c9; color: #fff; }
 
   #winList { width: 620px; }
   #winList table { border-collapse: collapse; width: 100%; }
