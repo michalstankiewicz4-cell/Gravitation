@@ -279,8 +279,8 @@
   // shell can gain/lose members freely (each change just closes out a "version"
   // into the same atom's own history — see updateNamedAtoms), but if the nucleus
   // itself changes, that atom ends outright and a brand-new one begins.
-  const NUCLEUS_MIN_DURATION = 20;     // seconds a nucleus membership must hold before it's considered stable
-  const ORBIT_SHELL_MIN_DURATION = 20; // seconds an orbiting photon's distance-to-nucleus must stay stable
+  const NUCLEUS_MIN_DURATION = 10;     // seconds a nucleus membership must hold before it's considered stable
+  const ORBIT_SHELL_MIN_DURATION = 10; // seconds an orbiting photon's distance-to-nucleus must stay stable
 
   const nucleusTracker = new Map(); // "id1_id2_..." (sorted) -> { members: Set, since, centroid: {x,y,z}|null }
 
