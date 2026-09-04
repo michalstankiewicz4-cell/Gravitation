@@ -18,7 +18,7 @@
   <div class="toolgroup" id="toolGroup">
     <span class="tg-label">Brush</span>
     <button class="tool-btn active" data-tool="select">Select</button>
-    <button class="tool-btn" data-tool="attract">Attract</button>
+    <button class="tool-btn" data-tool="attract" disabled title="Needs a flat screen&lt;-&gt;world mapping the 3D view doesn't have">Attract</button>
     <button class="tool-btn" data-tool="spawn">Spawn</button>
   </div>
 
@@ -31,13 +31,20 @@
 
   <div class="toolgroup" id="viewGroup">
     <span class="tg-label">View</span>
-    <button class="tool-btn" id="mainViewToggle" title="Toggle 2D / 2.5D field-height view">2D</button>
+    <button class="tool-btn" id="centerViewBtn" title="Reset zoom so the whole sphere is back in view">Center</button>
   </div>
 
-  <div class="toolgroup hidden" id="meshDensityRow">
-    <label for="meshDensity">Grid density</label>
+  <div class="toolgroup" id="meshDensityRow">
+    <label for="meshDensity">Sphere detail</label>
     <input type="range" id="meshDensity" min="0.5" max="3" step="0.1" value="1">
     <span id="meshDensityVal">1.0x</span>
+  </div>
+
+  <div class="toolgroup" id="boundaryModeRow">
+    <span class="tg-label">Boundary</span>
+    <button class="tool-btn boundary-mode-btn" data-mode="bounce" title="Photons bounce elastically off the sphere's boundary">Bounce</button>
+    <button class="tool-btn boundary-mode-btn" data-mode="off" title="No boundary force — photons that cross it despawn instead of bouncing or wrapping">Despawn</button>
+    <button class="tool-btn boundary-mode-btn active" data-mode="wrap" title="Photons that exit reappear on the opposite side of the sphere, same direction (default)">Wrap</button>
   </div>
 
   <div id="hint">Click a photon = details &nbsp;•&nbsp; drag a rectangle = photon list</div>
@@ -152,12 +159,6 @@
       <button class="tool-btn" data-color-mode="speed" title="White = fastest photon present, red = slowest — ranked by percentile, not raw value, so colors spread out evenly">Speed</button>
     </div>
     <label class="var-row"><input type="checkbox" id="glowToggle"> Glow around photons</label>
-
-    <div class="field-hint" style="margin-top:10px;">Which charges' field shows in the main 2.5D view (reactor windows have their own +/− next to their view toggle).</div>
-    <div class="toolgroup" id="fieldFilterGroup">
-      <button class="tool-btn charge-btn-size field-filter-btn active" data-sign="pos" title="Toggle field contribution from positive charges">+</button>
-      <button class="tool-btn charge-btn-size field-filter-btn active" data-sign="neg" title="Toggle field contribution from negative charges">−</button>
-    </div>
   </div>
 </div>
 
@@ -206,6 +207,17 @@
   <button class="dock-icon active" id="dockOrbits">Orbits</button>
 </div>
 
-<script src="js/script.js"></script>
+<!-- classic (non-module) scripts sharing one global scope, so load order matters —
+     this is the exact top-to-bottom order the code used to run in as one file. -->
+<script src="js/core/world.js"></script>
+<script src="js/core/photon.js"></script>
+<script src="js/core/sphere3d.js"></script>
+<script src="js/ui/render.js"></script>
+<script src="js/ui/panels.js"></script>
+<script src="js/ui/editor.js"></script>
+<script src="js/ui/selection.js"></script>
+<script src="js/reactor.js"></script>
+<script src="js/ui/window-manager.js"></script>
+<script src="js/ui/controls.js"></script>
 </body>
 </html>

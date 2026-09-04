@@ -41,6 +41,8 @@
     border-radius: 6px; padding: 6px 12px; font-size: 13px; cursor: pointer;
   }
   .tool-btn:hover, .charge-btn:hover { background: #232b42; }
+  .tool-btn:disabled, .charge-btn:disabled { opacity: .35; cursor: default; }
+  .tool-btn:disabled:hover, .charge-btn:disabled:hover { background: #161b28; }
   .tool-btn.active, .charge-btn.active { background: #3a4a7a; border-color: #6c85c9; color: #fff; box-shadow: 0 0 0 1px #6c85c9; }
   .charge-btn { padding: 6px 10px; min-width: 30px; text-align: center; }
   .charge-btn-size { padding: 6px 10px; min-width: 30px; text-align: center; }
