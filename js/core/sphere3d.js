@@ -212,6 +212,7 @@
     for (const [key, rec] of orbitTracker) {
       if (!seenOrbitPairs.has(key)) { finalizeOrbitEnd(key, rec); orbitTracker.delete(key); }
     }
+    updateClusterTracking(); // nucleus + orbital-shell "atom" tracking — see its own comment in photon.js
 
     // collected rather than removed in place — splicing mid-loop would desync the
     // indices step() and the pairwise loop above already relied on this frame

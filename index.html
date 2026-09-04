@@ -162,15 +162,15 @@
   </div>
 </div>
 
-<!-- bottom: detected stable-orbit pairs -->
+<!-- bottom: log of stable orbits (pairs) and nucleus+shell atoms -->
 <div class="window" id="winOrbits" style="bottom:60px; left:284px;">
   <div class="window-header">
-    <span>Orbits</span>
+    <span>Logs</span>
     <div class="window-btns"><button class="win-min" title="Minimize">–</button></div>
   </div>
   <div class="window-body">
-    <div class="field-hint">Pairs of photons whose distance has stayed roughly constant for a while — a sign they're locked into a stable orbit around each other.</div>
-    <div id="orbitsList"><div class="field-hint">No stable orbiting pairs detected yet.</div></div>
+    <div class="field-hint">Photons whose distance to each other has stayed roughly constant for a while — orbiting pairs, and atoms: a nucleus (2+ mutually-stable photons, none breaking off for 20s+, marked ★) with an orbital shell (other photons circling it at a steady distance for 20s+). An atom's name and history follow its nucleus — the shell can gain/lose members freely (logged as new versions), but a nucleus change starts an entirely new atom.</div>
+    <div id="orbitsList"><div class="field-hint">Nothing stable detected yet.</div></div>
   </div>
 </div>
 
@@ -204,7 +204,7 @@
   <button class="dock-icon active" id="dockForce">Force preview</button>
   <button class="dock-icon active" id="dockForceGraph">Force graph</button>
   <button class="dock-icon active" id="dockFilter">Filter</button>
-  <button class="dock-icon active" id="dockOrbits">Orbits</button>
+  <button class="dock-icon active" id="dockOrbits">Logs</button>
 </div>
 
 <!-- classic (non-module) scripts sharing one global scope, so load order matters —

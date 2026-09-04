@@ -101,6 +101,10 @@
   }
   .orbit-action-btn:hover { background: rgba(255,255,255,0.08); color: #fff; }
   .orbit-action-btn.active { background: rgba(108,133,201,0.35); border-color: #6c85c9; color: #fff; }
+  .fusion-expand { display: inline-block; color: #8b93ad; transition: transform 0.1s; }
+  .fusion-expand.open { transform: rotate(90deg); }
+  .fusion-history { margin: 0 -12px 4px; padding: 2px 12px 2px 28px; background: rgba(255,255,255,0.03); }
+  .fusion-history .row { padding: 2px 0; font-size: 12px; }
 
   #winList { width: 620px; }
   #winList table { border-collapse: collapse; width: 100%; }

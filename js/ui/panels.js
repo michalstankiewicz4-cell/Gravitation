@@ -20,121 +20,189 @@
     statAvgSpeed.textContent = (photons.length ? speedSum / photons.length : 0).toFixed(1) + ' px/s';
   }
 
-  // ---------- orbits panel: pairs flagged by updateOrbitTracking() in step() ----------
+  // ---------- Logs panel: orbit pairs (updateOrbitTracking()) and nucleus+shell
+  // atoms (updateClusterTracking()), both in stepMain3D() ----------
   const orbitsList = document.getElementById('orbitsList');
   let orbitsPanelTimer = 0;
   const ORBITS_PANEL_REFRESH = 0.5; // seconds of real time between DOM rebuilds — duration only needs whole-second resolution anyway
   const ORBIT_HISTORY_SHOWN = 5;    // most-recent ended orbits shown below the active ones
 
-  // pair keys ("idA_idB") whose force preview + connecting line are drawn on the
-  // main canvas every frame (see drawOrbitVisualizations() in render()) — toggled
-  // by each row's "eye" button, auto-dropped once the pair actually separates
-  // (stops interacting at all, not just "stable" — see pruneVisualizedOrbitPairs)
-  const visualizedOrbitPairs = new Set();
+  // group keys (sorted, underscore-joined member ids — "idA_idB" for a pair,
+  // "id1_id2_..." for an atom's nucleus+shell) whose force preview + connecting
+  // line are drawn on the main canvas every frame (see drawOrbitVisualizations3D()),
+  // toggled by each row's "eye" button, auto-dropped once the group actually
+  // stops holding together (not just once it dips below the stability bar —
+  // see pruneVisualizedGroups)
+  const visualizedGroups = new Set();
 
   function orbitRangeText(minD, maxD) { return minD.toFixed(0) + '–' + maxD.toFixed(0) + 'px'; }
+  function atomMembersText(members, nucleusSet) {
+    return members.map(id => '#' + id + (nucleusSet.has(id) ? '★' : '')).join(', ');
+  }
+
+  // named atoms whose shell-version history is currently shown expanded —
+  // keyed by nucleus key, persists across the panel's own periodic innerHTML
+  // rebuilds below
+  const expandedFusions = new Set();
 
   function updateOrbitsPanel(realDt) {
-    pruneVisualizedOrbitPairs();
+    pruneVisualizedGroups();
     orbitsPanelTimer += realDt;
     if (orbitsPanelTimer < ORBITS_PANEL_REFRESH) return;
     orbitsPanelTimer = 0;
 
-    const active = getStableOrbits().slice(0, 8);
-    const ended = Array.from(orbitHistoryByPair.values())
+    const activePairs = getStableOrbits().slice(0, 8);
+    const endedPairs = Array.from(orbitHistoryByPair.values())
       .sort((a, b) => b.endedAt - a.endedAt)
       .slice(0, ORBIT_HISTORY_SHOWN);
-    if (!active.length && !ended.length) {
-      orbitsList.innerHTML = '<div class="field-hint">No stable orbiting pairs detected yet.</div>';
+    const atoms = getNamedAtomRows();
+    if (!activePairs.length && !endedPairs.length && !atoms.length) {
+      orbitsList.innerHTML = '<div class="field-hint">Nothing stable detected yet.</div>';
       return;
     }
 
-    let html = active.map(o => {
+    function actionButtons(key) {
+      const vizOn = visualizedGroups.has(key);
+      return `<span class="orbit-actions">
+          <button class="orbit-action-btn orbit-center-btn" title="Zoom in so this reads clearly">⌖</button>
+          <button class="orbit-action-btn orbit-viz-btn${vizOn ? ' active' : ''}" title="Show force preview + connecting line on the map, until it breaks up">👁</button>
+        </span>`;
+    }
+
+    let html = activePairs.map(o => {
       const key = orbitPairKey({ id: o.idA }, { id: o.idB });
-      const vizOn = visualizedOrbitPairs.has(key);
       return `
-      <div class="row orbit-row" data-a="${o.idA}" data-b="${o.idB}" title="Click to select this pair">
+      <div class="row orbit-row" data-members="${o.idA},${o.idB}" data-key="${key}" title="Click to select this pair">
         <span class="k">#${o.idA} ↔ #${o.idB} <span class="orbit-range">${orbitRangeText(o.minD, o.maxD)}</span></span>
         <span class="v">${formatDuration(o.duration)}</span>
-        <span class="orbit-actions">
-          <button class="orbit-action-btn orbit-center-btn" title="Zoom in so this pair's orbit reads clearly">⌖</button>
-          <button class="orbit-action-btn orbit-viz-btn${vizOn ? ' active' : ''}" title="Show force preview + connecting line on the map, until they separate">👁</button>
-        </span>
+        ${actionButtons(key)}
       </div>`;
     }).join('');
-    if (ended.length) {
+    if (endedPairs.length) {
       html += '<div class="field-hint" style="margin:6px 0 2px">Recently ended</div>';
-      html += ended.map(o => `
-        <div class="row orbit-row ended" data-a="${o.idA}" data-b="${o.idB}" title="Click to select this pair">
+      html += endedPairs.map(o => `
+        <div class="row orbit-row ended" data-members="${o.idA},${o.idB}" title="Click to select this pair">
           <span class="k">#${o.idA} ↔ #${o.idB} <span class="orbit-range">${orbitRangeText(o.minD, o.maxD)}</span></span>
           <span class="v">(ended) ${formatDuration(o.duration)}</span>
         </div>`).join('');
     }
+    if (atoms.length) {
+      html += '<div class="field-hint" style="margin:6px 0 2px">Atoms (nucleus ★ + orbital shell) — click a name for its shell history</div>';
+      html += atoms.map(a => {
+        // viz toggle is keyed by the nucleus alone (its identity), not the exact
+        // current shell snapshot, so the preview keeps showing through shell
+        // membership changes — the render side (drawOrbitVisualizations3D) looks
+        // up the live shell itself via currentShellMembers(key)
+        const allMembers = a.nucleusMembers.concat(a.shell);
+        const key = a.key;
+        const nucleusSet = new Set(a.nucleusMembers);
+        const expanded = expandedFusions.has(a.key);
+        const props = `nucleus ${a.nucleusMembers.length}, orbit ${a.shell.length}, `
+          + `nucleus mass ${a.nucleusMass.toFixed(2)}, mass ${a.mass.toFixed(2)}, energy ${a.energy.toFixed(2)}`;
+        let row = `
+      <div class="row orbit-row fusion${a.active ? '' : ' ended'}" data-members="${allMembers.join(',')}" data-key="${key}" data-core="${a.key}" title="Click to expand its shell history">
+        <span class="k"><span class="fusion-expand${expanded ? ' open' : ''}">▸</span> ${a.name} <span class="orbit-range">${props}</span></span>
+        <span class="v">${a.active ? '' : '(ended) '}${formatDuration(a.duration)}</span>
+        ${actionButtons(key)}
+      </div>`;
+        if (expanded) {
+          row += `<div class="fusion-history">` + (a.history.length
+            ? a.history.map(v => `
+              <div class="row"><span class="k">${atomMembersText(v.shell, nucleusSet)}</span><span class="v">${formatDuration(v.duration)}</span></div>`).join('')
+            : '<div class="field-hint">No earlier shell versions yet.</div>') + `</div>`;
+        }
+        return row;
+      }).join('');
+    }
     orbitsList.innerHTML = html;
   }
 
-  // a visualized pair keeps showing while they're still interacting at all (still
-  // in orbitTracker), not just while "stable" — so it survives the normal wobble
-  // in/out of stability, and only clears once step() actually drops the pair for
-  // being out of force range (see step()'s orbitTracker cleanup) or a photon is deleted
-  function pruneVisualizedOrbitPairs() {
-    for (const key of visualizedOrbitPairs) {
-      const [idA, idB] = key.split('_').map(Number);
-      if (!orbitTracker.has(key) || !findPhoton(idA) || !findPhoton(idB)) visualizedOrbitPairs.delete(key);
+  // a visualized group keeps showing while it's still tracked at all (still in
+  // orbitTracker for a pair, nucleusTracker for an atom's nucleus), not just
+  // while past the display thresholds — so it survives the normal wobble in/out
+  // of stability, and only clears once the group truly stops holding together,
+  // or a member is removed. Atom keys are nucleus-only (see the atoms.map()
+  // above), so a 2-member key can match either a plain pair or a 2-member
+  // nucleus — checking both trackers covers either case.
+  function pruneVisualizedGroups() {
+    for (const key of visualizedGroups) {
+      const ids = key.split('_').map(Number);
+      if (ids.some(id => !findPhoton(id))) { visualizedGroups.delete(key); continue; }
+      const stillTracked = orbitTracker.has(key) || nucleusTracker.has(key);
+      if (!stillTracked) visualizedGroups.delete(key);
     }
   }
 
-  // zooms in on a pair, rotating first so the line from the sphere's own center
-  // through the pair's midpoint points straight at the viewer. The camera's pivot
-  // always stays on the sphere's center (mainProject3D rotates/scales everything
-  // around that point, never around an arbitrary recentered spot) — but by aiming
-  // that fixed pivot's viewing axis at the pair first, the pair's distance from
-  // center shows up entirely as depth instead of as a screen-space offset, so the
-  // zoom afterwards keeps them centered instead of pushing them toward the edge.
-  const ORBIT_ZOOM_TARGET_PX = 140; // desired on-screen separation between the pair
+  // zooms in on a group of photons (a pair, or a >2-member fusion), rotating
+  // first so the line from the sphere's own center through the group's centroid
+  // points straight at the viewer. The camera's pivot always stays on the
+  // sphere's center (mainProject3D rotates/scales everything around that point,
+  // never around an arbitrary recentered spot) — but by aiming that fixed
+  // pivot's viewing axis at the group first, its distance from center shows up
+  // entirely as depth instead of as a screen-space offset, so the zoom
+  // afterwards keeps it centered instead of pushing it toward the edge.
+  const ORBIT_ZOOM_TARGET_PX = 140; // desired on-screen radius of the group (centroid to farthest member)
   // capped well below the global MAX_ZOOM (8): zoom this far in and the sphere's
   // own curvature over the patch you can see gets imperceptible — the boundary
   // wireframe spreads out so far it's off-screen in every direction, so a tight
-  // orbit ends up looking like it's floating in open space instead of inside a
+  // group ends up looking like it's floating in open space instead of inside a
   // bounded sphere (even though the physics/wrap boundary is still fully in
   // effect — it's purely a "the horizon looks flat when you stand on it" artifact
   // of zooming in on any sphere). Staying under this keeps some visible curve.
   const ORBIT_MAX_ZOOM = 3;
-  function centerCameraOnPair(idA, idB) {
-    const a = findPhoton(idA), b = findPhoton(idB);
-    if (!a || !b) return;
+  function centerCameraOnMembers(ids) {
+    const members = ids.map(findPhoton).filter(Boolean);
+    if (members.length === 0) return;
     const c = mainSphereCenter();
-    const midX = (a.x + b.x) / 2 - c.x, midY = (a.y + b.y) / 2 - c.y, midZ = (a.z + b.z) / 2 - c.z;
-    const horizR = Math.hypot(midX, midY);
-    mainRot3D.y = Math.atan2(midX, midY);
-    mainRot3D.x = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, Math.atan2(horizR, midZ)));
+    let mx = 0, my = 0, mz = 0;
+    for (const p of members) { mx += p.x; my += p.y; mz += p.z; }
+    mx /= members.length; my /= members.length; mz /= members.length;
 
-    const sep = Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
-    zoom = Math.max(MIN_ZOOM, Math.min(ORBIT_MAX_ZOOM, ORBIT_ZOOM_TARGET_PX / Math.max(sep, 1)));
+    const relX = mx - c.x, relY = my - c.y, relZ = mz - c.z;
+    const horizR = Math.hypot(relX, relY);
+    mainRot3D.y = Math.atan2(relX, relY);
+    mainRot3D.x = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, Math.atan2(horizR, relZ)));
+
+    // "spread" = farthest member from the centroid — for a pair this is exactly
+    // half their separation, so the zoom formula matches the old pair-only math
+    let maxSpread = 1;
+    for (const p of members) maxSpread = Math.max(maxSpread, Math.hypot(p.x - mx, p.y - my, p.z - mz));
+    zoom = Math.max(MIN_ZOOM, Math.min(ORBIT_MAX_ZOOM, ORBIT_ZOOM_TARGET_PX / (maxSpread * 2)));
   }
 
   // event delegation: rows are rebuilt wholesale on every refresh above, so a
-  // single listener on the (never-replaced) container beats re-binding per row
+  // single listener on the (never-replaced) container beats re-binding per row.
+  // Atom rows toggle their shell-version history on click (see expandedFusions);
+  // pair rows still select into the main "Selected photons" list, as before.
+  // data-key (viz toggle identity) and data-members (framing/selection set) are
+  // kept separate — for an atom they differ (nucleus-only vs nucleus+shell).
   orbitsList.addEventListener('click', (e) => {
     const centerBtn = e.target.closest('.orbit-center-btn');
     const vizBtn = e.target.closest('.orbit-viz-btn');
     const row = e.target.closest('.orbit-row');
     if (!row) return;
-    const idA = Number(row.dataset.a), idB = Number(row.dataset.b);
+    const ids = row.dataset.members.split(',').map(Number);
+    const key = row.dataset.key;
     if (centerBtn) {
       e.stopPropagation();
-      centerCameraOnPair(idA, idB);
+      centerCameraOnMembers(ids);
       return;
     }
     if (vizBtn) {
       e.stopPropagation();
-      const key = orbitPairKey({ id: idA }, { id: idB });
-      if (visualizedOrbitPairs.has(key)) visualizedOrbitPairs.delete(key);
-      else visualizedOrbitPairs.add(key);
-      vizBtn.classList.toggle('active', visualizedOrbitPairs.has(key));
+      if (visualizedGroups.has(key)) visualizedGroups.delete(key);
+      else visualizedGroups.add(key);
+      vizBtn.classList.toggle('active', visualizedGroups.has(key));
       return;
     }
-    showListPanel([idA, idB]);
+    if (row.classList.contains('fusion')) {
+      const core = row.dataset.core;
+      if (expandedFusions.has(core)) expandedFusions.delete(core);
+      else expandedFusions.add(core);
+      orbitsPanelTimer = ORBITS_PANEL_REFRESH; // force an immediate rebuild instead of waiting for the next tick
+      return;
+    }
+    showListPanel(ids);
   });
 
   // force preview + connecting line for every pair toggled on via the Orbits
@@ -146,8 +214,8 @@
   const ORBIT_ATTRACT_COLOR = 'rgba(69,130,255,ALPHA)';  // same blue as "opposite charges" elsewhere
   const ORBIT_REPEL_COLOR = 'rgba(255,153,45,ALPHA)';    // same orange as "same charge" elsewhere
   function drawOrbitVisualizations() {
-    if (visualizedOrbitPairs.size === 0) return;
-    for (const key of visualizedOrbitPairs) {
+    if (visualizedGroups.size === 0) return;
+    for (const key of visualizedGroups) {
       const [idA, idB] = key.split('_').map(Number);
       const a = findPhoton(idA), b = findPhoton(idB);
       if (!a || !b) continue;
@@ -177,30 +245,71 @@
 
   // 3D counterpart of drawOrbitVisualizations() above — same physics (real 3D
   // distance now, see currentPairForce), same per-photon field shells as the
-  // selected-photon "shell view" (drawFieldShells3D, shared with reactor windows),
-  // just with the pair's own real range/amp/chargeProduct instead of a fixed
-  // "opposite test charge" reference, plus a connecting line between them.
+  // selected-photon "shell view" (drawFieldShells3D, shared with reactor windows).
+  // Pairs: the pair's own real range/amp/chargeProduct (not a fixed "opposite test
+  // charge" reference) plus a connecting line between them. Atoms (nucleusTracker
+  // keys): shells around just the core (innermost/"first ring" of the nucleus),
+  // using its own field, with spoke lines out to every other nucleus member AND
+  // whatever's currently on its orbital shell (fetched live via
+  // currentShellMembers, since the viz key is nucleus-only and the shell keeps
+  // changing) — there's no single well-defined "mutual force" for a whole group
+  // the way there is for a pair.
   function drawOrbitVisualizations3D(targetCtx, project) {
-    if (visualizedOrbitPairs.size === 0) return;
-    for (const key of visualizedOrbitPairs) {
-      const [idA, idB] = key.split('_').map(Number);
-      const a = findPhoton(idA), b = findPhoton(idB);
-      if (!a || !b) continue;
-      const { range, f, amp, periodsAvg, offsetAvg, phaseShiftAvg, chargeProduct } = currentPairForce(a, b);
-      const intensity = range > 0 ? Math.max(0, Math.min(1, Math.abs(f) / (amp || 1))) : 0;
-      const color = (f >= 0 ? ORBIT_ATTRACT_COLOR : ORBIT_REPEL_COLOR).replace('ALPHA', (0.35 + 0.5 * intensity).toFixed(2));
+    if (visualizedGroups.size === 0) return;
+    for (const key of visualizedGroups) {
+      const nRec = nucleusTracker.get(key);
+      const ids = nRec ? Array.from(nRec.members).concat(currentShellMembers(key)) : key.split('_').map(Number);
+      const members = ids.map(findPhoton).filter(Boolean);
+      if (members.length < 2) continue;
 
-      drawFieldShells3D(targetCtx, a.x, a.y, a.z, range, amp, periodsAvg, offsetAvg, phaseShiftAvg, chargeProduct, project, colorForCharge(a.charge, 1));
-      drawFieldShells3D(targetCtx, b.x, b.y, b.z, range, amp, periodsAvg, offsetAvg, phaseShiftAvg, chargeProduct, project, colorForCharge(b.charge, 1));
+      if (members.length === 2) {
+        const [a, b] = members;
+        const { range, f, amp, periodsAvg, offsetAvg, phaseShiftAvg, chargeProduct } = currentPairForce(a, b);
+        const intensity = range > 0 ? Math.max(0, Math.min(1, Math.abs(f) / (amp || 1))) : 0;
+        const color = (f >= 0 ? ORBIT_ATTRACT_COLOR : ORBIT_REPEL_COLOR).replace('ALPHA', (0.35 + 0.5 * intensity).toFixed(2));
 
-      const [ax, ay] = project(a.x, a.y, a.z);
-      const [bx, by] = project(b.x, b.y, b.z);
-      targetCtx.strokeStyle = color;
-      targetCtx.lineWidth = 1.5 + 2.5 * intensity;
-      targetCtx.beginPath();
-      targetCtx.moveTo(ax, ay);
-      targetCtx.lineTo(bx, by);
-      targetCtx.stroke();
+        drawFieldShells3D(targetCtx, a.x, a.y, a.z, range, amp, periodsAvg, offsetAvg, phaseShiftAvg, chargeProduct, project, colorForCharge(a.charge, 1));
+        drawFieldShells3D(targetCtx, b.x, b.y, b.z, range, amp, periodsAvg, offsetAvg, phaseShiftAvg, chargeProduct, project, colorForCharge(b.charge, 1));
+
+        const [ax, ay] = project(a.x, a.y, a.z);
+        const [bx, by] = project(b.x, b.y, b.z);
+        targetCtx.strokeStyle = color;
+        targetCtx.lineWidth = 1.5 + 2.5 * intensity;
+        targetCtx.beginPath();
+        targetCtx.moveTo(ax, ay);
+        targetCtx.lineTo(bx, by);
+        targetCtx.stroke();
+        continue;
+      }
+
+      // core = innermost NUCLEUS member specifically (not just whoever's nearest
+      // to the combined centroid) — an orbiting shell photon should never stand
+      // in as the "core" just because of where it happens to be right now
+      const coreCandidates = nRec ? members.filter(p => nRec.members.has(p.id)) : members;
+      const c = nRec && nRec.centroid ? nRec.centroid : (() => {
+        let cx = 0, cy = 0, cz = 0;
+        for (const p of coreCandidates) { cx += p.x; cy += p.y; cz += p.z; }
+        return { x: cx / coreCandidates.length, y: cy / coreCandidates.length, z: cz / coreCandidates.length };
+      })();
+      let core = coreCandidates[0], bestD = Infinity;
+      for (const p of coreCandidates) {
+        const d = Math.hypot(p.x - c.x, p.y - c.y, p.z - c.z);
+        if (d < bestD) { bestD = d; core = p; }
+      }
+
+      drawFieldShells3D(targetCtx, core.x, core.y, core.z, core.forceRange, core.force, core.periods, core.waveOffset, core.phaseShift, -1, project, photonColor(core, 1));
+
+      const [coreX, coreY] = project(core.x, core.y, core.z);
+      targetCtx.strokeStyle = 'rgba(255,210,80,0.6)';
+      targetCtx.lineWidth = 1.5;
+      for (const p of members) {
+        if (p === core) continue;
+        const [px, py] = project(p.x, p.y, p.z);
+        targetCtx.beginPath();
+        targetCtx.moveTo(coreX, coreY);
+        targetCtx.lineTo(px, py);
+        targetCtx.stroke();
+      }
     }
   }
 
