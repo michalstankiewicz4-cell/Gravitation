@@ -269,31 +269,66 @@
   }
 
   // ---------- nucleus + atom detection ----------
-  // Two-tier model, mirroring a real atom: a tightly-bound NUCLEUS (2+ photons
-  // connected by the SAME stable-pair graph orbitTracker already maintains,
-  // held together — same exact membership — unbroken for NUCLEUS_MIN_DURATION)
-  // at the center, plus a looser ORBITAL SHELL of other photons circling that
-  // nucleus's centroid at a roughly constant distance for at least
-  // ORBIT_SHELL_MIN_DURATION. Only once both are satisfied does the whole thing
-  // become a named "atom". Its identity is tied to the NUCLEUS specifically: the
-  // shell can gain/lose members freely (each change just closes out a "version"
-  // into the same atom's own history — see updateNamedAtoms), but if the nucleus
-  // itself changes, that atom ends outright and a brand-new one begins.
-  const NUCLEUS_MIN_DURATION = 10;     // seconds a nucleus membership must hold before it's considered stable
-  const ORBIT_SHELL_MIN_DURATION = 10; // seconds an orbiting photon's distance-to-nucleus must stay stable
+  // A tightly-bound NUCLEUS (2+ photons connected by the SAME stable-pair graph
+  // orbitTracker already maintains, held together — same exact membership —
+  // unbroken for NUCLEUS_MIN_DURATION) becomes a named "Atom" directly once it
+  // clears that threshold. Its identity IS its nucleus membership: if the
+  // nucleus itself changes, that atom ends outright (see updateNamedAtoms) and
+  // a brand-new one begins under a new name.
+  //
+  // An ORBITAL SHELL tier (other photons circling the nucleus's centroid at a
+  // roughly constant distance) was designed alongside this — see
+  // nucleusFieldBand's outerR, nucleusFieldSource, updateShellTracking,
+  // currentShellMembers below — but is DISABLED for now (updateShellTracking
+  // is not called from updateClusterTracking) at the user's request: right now
+  // an atom is just its nucleus, full stop. shellTracker stays empty and
+  // currentShellMembers() always returns [] as a result, which is exactly what
+  // lets drawOrbitVisualizations3D's live nucleus+shell lookup keep working
+  // unchanged (it just never finds any shell members to add). Re-enable by
+  // calling updateShellTracking() again once orbit checking comes back.
+  const NUCLEUS_MIN_DURATION = 20;     // seconds a nucleus membership must hold before it becomes a named atom
+  const ORBIT_SHELL_MIN_DURATION = 20; // seconds an orbiting photon's distance-to-nucleus must stay stable (currently unused — see above)
 
   const nucleusTracker = new Map(); // "id1_id2_..." (sorted) -> { members: Set, since, centroid: {x,y,z}|null }
 
   function nucleusKey(members) { return Array.from(members).sort((a, b) => a - b).join('_'); }
 
+  // the two force-curve landmarks that split a pair's interaction range into
+  // nucleus vs. shell territory: innerR is HALF the distance out to the first
+  // full wave cycle — half of the first period tick mark on the Force Graph
+  // window (see renderForceGraph's periodPx = range/periodsMag, which is what
+  // the "pcount" helper variable ultimately controls via periods =
+  // energy/pcount) — and outerR is the far edge of the whole force field (the
+  // last cycle completes exactly at the range boundary). Only pairs actually
+  // holding station inside innerR are tight enough to count as nucleus-bound;
+  // anything stable between innerR and outerR belongs on the looser orbital
+  // shell instead (see updateShellTracking), and beyond outerR there's no
+  // interaction left to speak of at all. Halving innerR (instead of using the
+  // full first-cycle distance) leaves more of the pair's range as shell
+  // territory, so a lot fewer stable pairs get swallowed into "nucleus" before
+  // ever getting a chance to be recognized as an orbiting shell member — with
+  // the full first cycle as the cutoff, nearly everything stable ended up
+  // nucleus-bound and atoms almost never had a shell photon left to be named with.
+  function nucleusFieldBand(a, b) {
+    const range = (a.forceRange + b.forceRange) / 2;
+    const periodsAvg = Math.abs((a.periods + b.periods) / 2);
+    const innerR = (periodsAvg > 0 ? range / periodsAvg : range) / 2;
+    return { innerR, outerR: range };
+  }
+
   function computeStableNucleusGroups() {
-    // union-find over every currently-stable pair in orbitTracker
+    // union-find over every currently-stable pair in orbitTracker that ALSO
+    // currently sits inside its own nucleus-ring radius
     const parent = new Map();
     function find(x) { while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x))); x = parent.get(x); } return x; }
     function union(a, b) { const ra = find(a), rb = find(b); if (ra !== rb) parent.set(ra, rb); }
     for (const [key, rec] of orbitTracker) {
       if (rec.stableSince === null) continue;
       const [a, b] = key.split('_').map(Number);
+      const pa = findPhoton(a), pb = findPhoton(b);
+      if (!pa || !pb) continue;
+      const d = Math.hypot(pb.x - pa.x, pb.y - pa.y, pb.z - pa.z);
+      if (d > nucleusFieldBand(pa, pb).innerR) continue;
       if (!parent.has(a)) parent.set(a, a);
       if (!parent.has(b)) parent.set(b, b);
       union(a, b);
@@ -335,7 +370,7 @@
     for (const key of nucleusTracker.keys()) {
       if (!seenKeys.has(key)) nucleusTracker.delete(key);
     }
-    updateShellTracking();
+    // updateShellTracking(); // disabled for now — see this section's own comment above
     updateNamedAtoms();
   }
 
@@ -347,14 +382,40 @@
   // "electrons" around a "nucleus" that isn't stable yet.
   const shellTracker = new Map(); // "nucleusKey|photonId" -> { samples, stableSince, stableMinD, stableMaxD }
 
+  // average forceRange/periods across a nucleus's own members — stands in for
+  // "the nucleus's own field" when checking a shell candidate's distance
+  // against nucleusFieldBand, the same way a single photon's own values do for
+  // an ordinary pair
+  function nucleusFieldSource(nRec) {
+    let forceRange = 0, periods = 0, n = 0;
+    for (const id of nRec.members) {
+      const p = findPhoton(id);
+      if (!p) continue;
+      forceRange += p.forceRange; periods += p.periods; n++;
+    }
+    return n > 0 ? { forceRange: forceRange / n, periods: periods / n } : null;
+  }
+
   function updateShellTracking() {
     for (const [nKey, nRec] of nucleusTracker) {
       if (simTime - nRec.since < NUCLEUS_MIN_DURATION || !nRec.centroid) continue;
       const c = nRec.centroid;
+      const fieldSource = nucleusFieldSource(nRec);
+      if (!fieldSource) continue;
       for (const p of photons) {
         if (nRec.members.has(p.id)) continue;
         const d = Math.hypot(p.x - c.x, p.y - c.y, p.z - c.z);
         const shellKey = nKey + '|' + p.id;
+        // must sit strictly between the nucleus's own first-ring boundary and
+        // the outer edge of its force field — inside the ring it'd already be
+        // nucleus-bound (see computeStableNucleusGroups), beyond the outer edge
+        // there's no interaction left to hold it in place at all
+        const { innerR, outerR } = nucleusFieldBand(p, fieldSource);
+        if (d < innerR || d > outerR) {
+          const rec = shellTracker.get(shellKey);
+          if (rec) rec.stableSince = null;
+          continue;
+        }
         let rec = shellTracker.get(shellKey);
         if (!rec) { rec = { samples: [], stableSince: null, stableMinD: 0, stableMaxD: 0 }; shellTracker.set(shellKey, rec); }
         rec.samples.push({ t: simTime, d });
@@ -392,84 +453,55 @@
   }
 
   // ---------- named atoms: a persistent identity for a stable nucleus ----------
-  // keyed by the nucleus's own membership (see updateClusterTracking above), so
-  // changing the ORBITAL SHELL just closes out a "version" into the same atom's
-  // history, but changing the NUCLEUS always means a brand-new atom — an atom's
-  // identity IS its nucleus.
+  // keyed by the nucleus's own membership (see updateClusterTracking above) —
+  // an atom's identity IS its nucleus, so a nucleus change always means a
+  // brand-new atom under a new name. With orbit/shell checking disabled for
+  // now (see this section's top comment), there's nothing yet to close out
+  // mid-life as a "version" — history only gains an entry when the atom's
+  // nucleus itself dissolves outright, ending that atom for good.
   const ATOM_NAME_PARTS = ['Xen', 'Vel', 'Kry', 'Nyx', 'Or', 'Tha', 'Zar', 'Quin', 'Myr', 'Il', 'Cor', 'Ast', 'Vor', 'Lun', 'Sol'];
   function randomAtomName() {
     const a = ATOM_NAME_PARTS[Math.floor(Math.random() * ATOM_NAME_PARTS.length)];
     const b = ATOM_NAME_PARTS[Math.floor(Math.random() * ATOM_NAME_PARTS.length)].toLowerCase();
     return a + b + '-' + (Math.floor(Math.random() * 90) + 10);
   }
-  function membersEqual(a, b) {
-    if (a.length !== b.length) return false;
-    const sa = new Set(a);
-    return b.every(id => sa.has(id));
-  }
-  const ATOM_HISTORY_MAX = 20; // capped per-atom shell-version history
-  // nucleusKey -> { name, nucleusMembers, currentShell, currentShellSince, history: [{shell,duration,endedAt}], active }
+  const ATOM_HISTORY_MAX = 20; // capped per-atom history (currently only grows when an atom ends)
+  // nucleusKey -> { name, nucleusMembers, since, history: [{duration,endedAt}], active }
   const namedAtoms = new Map();
 
   function updateNamedAtoms() {
     const activeKeys = new Set();
     for (const [nKey, nRec] of nucleusTracker) {
       if (simTime - nRec.since < NUCLEUS_MIN_DURATION) continue;
-      const shell = currentShellMembers(nKey);
-      let atom = namedAtoms.get(nKey);
-      if (!atom) {
-        if (shell.length === 0) continue; // needs at least one qualifying orbiter to be born
-        // back-date to whichever qualifying orbiter has been stable longest, so
-        // the very first duration shown isn't understated
-        let earliestSince = simTime;
-        for (const id of shell) {
-          const srec = shellTracker.get(nKey + '|' + id);
-          if (srec && srec.stableSince !== null) earliestSince = Math.min(earliestSince, srec.stableSince);
-        }
+      activeKeys.add(nKey);
+      if (!namedAtoms.has(nKey)) {
         namedAtoms.set(nKey, {
           name: randomAtomName(), nucleusMembers: Array.from(nRec.members),
-          currentShell: shell, currentShellSince: earliestSince, history: [], active: true
+          since: nRec.since, history: [], active: true
         });
-        activeKeys.add(nKey);
-        continue;
-      }
-      activeKeys.add(nKey);
-      atom.active = true;
-      if (!membersEqual(atom.currentShell, shell)) {
-        atom.history.unshift({ shell: atom.currentShell, duration: simTime - atom.currentShellSince, endedAt: simTime });
-        atom.history.length = Math.min(atom.history.length, ATOM_HISTORY_MAX);
-        atom.currentShell = shell;
-        atom.currentShellSince = simTime;
       }
     }
     for (const [nKey, atom] of namedAtoms) {
       if (atom.active && !activeKeys.has(nKey)) {
-        atom.history.unshift({ shell: atom.currentShell, duration: simTime - atom.currentShellSince, endedAt: simTime });
+        atom.history.unshift({ duration: simTime - atom.since, endedAt: simTime });
         atom.history.length = Math.min(atom.history.length, ATOM_HISTORY_MAX);
         atom.active = false;
       }
     }
   }
 
-  // one row per named atom (active or ended) for the Logs panel — its own
-  // `history` is sorted longest-first, so it's easy to see which shell version
-  // held together longest around this particular nucleus. nucleusMass/
-  // nucleusEnergy are summed over just the nucleus (the atom's dense "core"),
-  // mass/energy are the whole atom's totals — nucleus plus whatever's
-  // currently on the orbital shell — so both the core weight and the full
-  // picture are available to the panel.
+  // one row per named atom (active or ended) for the Logs panel. mass/energy/
+  // charge are all summed over the nucleus members — the whole atom, since
+  // there's no separate orbital shell contributing right now (see above).
   function getNamedAtomRows() {
     const result = [];
     for (const [nKey, atom] of namedAtoms) {
-      let nucleusMass = 0, nucleusEnergy = 0;
-      for (const id of atom.nucleusMembers) { const p = findPhoton(id); if (p) { nucleusMass += p.mass; nucleusEnergy += p.energy; } }
-      let shellMass = 0, shellEnergy = 0;
-      for (const id of atom.currentShell) { const p = findPhoton(id); if (p) { shellMass += p.mass; shellEnergy += p.energy; } }
-      const duration = atom.active ? (simTime - atom.currentShellSince) : (atom.history.length ? atom.history[0].duration : 0);
+      let mass = 0, energy = 0, charge = 0;
+      for (const id of atom.nucleusMembers) { const p = findPhoton(id); if (p) { mass += p.mass; energy += p.energy; charge += p.charge; } }
+      const duration = atom.active ? (simTime - atom.since) : (atom.history.length ? atom.history[0].duration : 0);
       result.push({
         key: nKey, name: atom.name, active: atom.active,
-        nucleusMembers: atom.nucleusMembers, shell: atom.currentShell, duration,
-        nucleusMass, nucleusEnergy, mass: nucleusMass + shellMass, energy: nucleusEnergy + shellEnergy,
+        nucleusMembers: atom.nucleusMembers, duration, mass, energy, charge,
         history: atom.history.slice().sort((a, b) => b.duration - a.duration)
       });
     }

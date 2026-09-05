@@ -36,9 +36,6 @@
   const visualizedGroups = new Set();
 
   function orbitRangeText(minD, maxD) { return minD.toFixed(0) + '–' + maxD.toFixed(0) + 'px'; }
-  function atomMembersText(members, nucleusSet) {
-    return members.map(id => '#' + id + (nucleusSet.has(id) ? '★' : '')).join(', ');
-  }
 
   // named atoms whose shell-version history is currently shown expanded —
   // keyed by nucleus key, persists across the panel's own periodic innerHTML
@@ -87,20 +84,14 @@
         </div>`).join('');
     }
     if (atoms.length) {
-      html += '<div class="field-hint" style="margin:6px 0 2px">Atoms (nucleus ★ + orbital shell) — click a name for its shell history</div>';
+      html += '<div class="field-hint" style="margin:6px 0 2px">Atoms (stable nucleus, 20s+) — click a name for its history</div>';
       html += atoms.map(a => {
-        // viz toggle is keyed by the nucleus alone (its identity), not the exact
-        // current shell snapshot, so the preview keeps showing through shell
-        // membership changes — the render side (drawOrbitVisualizations3D) looks
-        // up the live shell itself via currentShellMembers(key)
-        const allMembers = a.nucleusMembers.concat(a.shell);
         const key = a.key;
-        const nucleusSet = new Set(a.nucleusMembers);
         const expanded = expandedFusions.has(a.key);
-        const props = `nucleus ${a.nucleusMembers.length}, orbit ${a.shell.length}, `
-          + `nucleus mass ${a.nucleusMass.toFixed(2)}, mass ${a.mass.toFixed(2)}, energy ${a.energy.toFixed(2)}`;
+        const props = `nucleus ${a.nucleusMembers.length}, charge ${a.charge.toFixed(2)}, `
+          + `mass ${a.mass.toFixed(2)}, energy ${a.energy.toFixed(2)}`;
         let row = `
-      <div class="row orbit-row fusion${a.active ? '' : ' ended'}" data-members="${allMembers.join(',')}" data-key="${key}" data-core="${a.key}" title="Click to expand its shell history">
+      <div class="row orbit-row fusion${a.active ? '' : ' ended'}" data-members="${a.nucleusMembers.join(',')}" data-key="${key}" data-core="${a.key}" title="Click to expand its history">
         <span class="k"><span class="fusion-expand${expanded ? ' open' : ''}">▸</span> ${a.name} <span class="orbit-range">${props}</span></span>
         <span class="v">${a.active ? '' : '(ended) '}${formatDuration(a.duration)}</span>
         ${actionButtons(key)}
@@ -108,8 +99,8 @@
         if (expanded) {
           row += `<div class="fusion-history">` + (a.history.length
             ? a.history.map(v => `
-              <div class="row"><span class="k">${atomMembersText(v.shell, nucleusSet)}</span><span class="v">${formatDuration(v.duration)}</span></div>`).join('')
-            : '<div class="field-hint">No earlier shell versions yet.</div>') + `</div>`;
+              <div class="row"><span class="k">ended</span><span class="v">${formatDuration(v.duration)}</span></div>`).join('')
+            : '<div class="field-hint">No earlier episodes yet.</div>') + `</div>`;
         }
         return row;
       }).join('');
@@ -311,6 +302,50 @@
         targetCtx.stroke();
       }
     }
+  }
+
+  // green marker circle around every currently-active named atom (nucleus +
+  // shell together) — drawn every frame regardless of the Logs panel's own
+  // eye-toggle, so a newly-named atom stands out immediately from the crowd of
+  // plain (unnamed) stable pairs and not-yet-named nuclei drifting around.
+  // mainProject3D is a pure orthographic scale+rotate (see its own comment in
+  // sphere3d.js) with no perspective divide, so a world-space radius always
+  // maps to screen radius * zoom regardless of depth or rotation. Solid (not
+  // dashed) and with a floor on the on-screen radius: a dashed or too-small
+  // ring reads as a washed-out gray smudge against the sphere's own wireframe
+  // rather than a clearly green marker, especially when the atom is small or
+  // the view is zoomed out.
+  const ATOM_MARKER_PADDING = 10;    // px of world-space breathing room past the outermost member
+  const ATOM_MARKER_MIN_SCREEN_R = 22; // never render smaller than this on screen
+  function drawNamedAtomMarkers3D(targetCtx, project) {
+    const atoms = getNamedAtomRows().filter(a => a.active);
+    if (atoms.length === 0) return;
+    targetCtx.save();
+    targetCtx.shadowBlur = 0; // don't inherit the photon-glow shadow color/blur left over from earlier draws
+    for (const a of atoms) {
+      const members = a.nucleusMembers.map(findPhoton).filter(Boolean);
+      if (members.length === 0) continue;
+      let cx = 0, cy = 0, cz = 0;
+      for (const p of members) { cx += p.x; cy += p.y; cz += p.z; }
+      cx /= members.length; cy /= members.length; cz /= members.length;
+      let maxD = 0;
+      for (const p of members) maxD = Math.max(maxD, Math.hypot(p.x - cx, p.y - cy, p.z - cz));
+      const [sx, sy] = project(cx, cy, cz);
+      const screenR = Math.max(ATOM_MARKER_MIN_SCREEN_R, (maxD + ATOM_MARKER_PADDING) * zoom);
+
+      targetCtx.strokeStyle = '#3dff6e';
+      targetCtx.lineWidth = 2.5;
+      targetCtx.beginPath();
+      targetCtx.arc(sx, sy, screenR, 0, Math.PI * 2);
+      targetCtx.stroke();
+
+      targetCtx.fillStyle = '#3dff6e';
+      targetCtx.font = 'bold 12px sans-serif';
+      targetCtx.textAlign = 'center';
+      targetCtx.fillText(a.name, sx, sy - screenR - 6);
+      targetCtx.textAlign = 'left';
+    }
+    targetCtx.restore();
   }
 
   // ---------- stats panel settings: which rows are shown, persisted ----------

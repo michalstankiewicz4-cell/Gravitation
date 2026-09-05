@@ -145,6 +145,9 @@
     // orbit-pair force preview + connecting line — the 3D counterpart of the
     // (now-unused, 2D-only) drawOrbitVisualizations()
     drawOrbitVisualizations3D(ctx, mainProject3D);
+    // always-on green marker around any currently-named atom, independent of
+    // the Logs panel's own eye-toggle
+    drawNamedAtomMarkers3D(ctx, mainProject3D);
     ctx.shadowBlur = 0;
     ctx.restore();
 
