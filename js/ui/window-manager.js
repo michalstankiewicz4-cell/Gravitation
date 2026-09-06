@@ -126,8 +126,10 @@
   const dockFilter = document.getElementById('dockFilter');
   const winOrbits = document.getElementById('winOrbits');
   const dockOrbits = document.getElementById('dockOrbits');
+  const winPeriodic = document.getElementById('winPeriodic');
+  const dockPeriodic = document.getElementById('dockPeriodic');
 
-  [ [winStats, dockStats], [winEditor, dockEditor], [winForce, dockForce], [winForceGraph, dockForceGraph], [winFilter, dockFilter], [winOrbits, dockOrbits] ].forEach(([win, dockBtn]) => {
+  [ [winStats, dockStats], [winEditor, dockEditor], [winForce, dockForce], [winForceGraph, dockForceGraph], [winFilter, dockFilter], [winOrbits, dockOrbits], [winPeriodic, dockPeriodic] ].forEach(([win, dockBtn]) => {
     makeDraggable(win);
     win.querySelector('.win-min').addEventListener('click', () => minimizeWin(win, dockBtn));
     dockBtn.addEventListener('click', () => toggleWin(win, dockBtn));

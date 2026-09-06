@@ -347,7 +347,32 @@
       if (!groups.has(root)) groups.set(root, new Set());
       groups.get(root).add(id);
     }
-    return Array.from(groups.values()).filter(g => g.size >= 2);
+    // A union-find component only guarantees a CHAIN of ring-tight edges (A-B
+    // tight, B-C tight), not that every member sits near every other member —
+    // A and C can end up far apart, which looks exactly like two separate
+    // atoms linked by a connector rather than one compact central nucleus.
+    // Only accept a group that's a genuine clique: every pair inside it, not
+    // just the connecting edges that happened to union it, must itself be
+    // within its own ring distance. A group that fails this simply isn't
+    // reported as a nucleus this frame (better than reporting a misleadingly
+    // wide one) — it'll qualify once the geometry actually closes up, or split
+    // back into whichever smaller sub-pairs are still genuinely tight.
+    const result = [];
+    for (const members of groups.values()) {
+      if (members.size < 2) continue;
+      const ids = Array.from(members);
+      let isClique = true;
+      for (let i = 0; i < ids.length && isClique; i++) {
+        for (let j = i + 1; j < ids.length; j++) {
+          const pa = findPhoton(ids[i]), pb = findPhoton(ids[j]);
+          if (!pa || !pb) { isClique = false; break; }
+          const d = Math.hypot(pb.x - pa.x, pb.y - pa.y, pb.z - pa.z);
+          if (d > nucleusFieldBand(pa, pb).innerR) { isClique = false; break; }
+        }
+      }
+      if (isClique) result.push(members);
+    }
+    return result;
   }
 
   function groupCentroid(members) {
@@ -477,12 +502,37 @@
   // nucleusKey -> { name, nucleusMembers, since, history: [{duration,endedAt}], active }
   const namedAtoms = new Map();
 
+  // ---------- element registry: the periodic table ----------
+  // An individual named atom is a one-off instance (its name/history die with
+  // its specific nucleus membership — see above), but the periodic table is
+  // about the SPECIES: every distinct nucleus size ("particle count" standing
+  // in for atomic number, the one property this model actually tracks) gets
+  // its own persistent name the first time it's ever formed, and a running
+  // count of how many separate atoms of that size have appeared over the
+  // whole session — this Map is never pruned, unlike namedAtoms.
+  const elementRegistry = new Map(); // nucleus size -> { name, count, firstSeenAt }
+
+  function registerElementDiscovery(size) {
+    let el = elementRegistry.get(size);
+    if (!el) { el = { name: randomAtomName(), count: 0, firstSeenAt: simTime }; elementRegistry.set(size, el); }
+    el.count++;
+    return el;
+  }
+
+  function getElementRows() {
+    const rows = [];
+    for (const [size, el] of elementRegistry) rows.push({ size, name: el.name, count: el.count, firstSeenAt: el.firstSeenAt });
+    rows.sort((a, b) => a.size - b.size);
+    return rows;
+  }
+
   function updateNamedAtoms() {
     const activeKeys = new Set();
     for (const [nKey, nRec] of nucleusTracker) {
       if (simTime - nRec.since < NUCLEUS_MIN_DURATION) continue;
       activeKeys.add(nKey);
       if (!namedAtoms.has(nKey)) {
+        registerElementDiscovery(nRec.members.size);
         namedAtoms.set(nKey, {
           name: randomAtomName(), nucleusMembers: Array.from(nRec.members),
           since: nRec.since, history: [], active: true

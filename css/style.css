@@ -125,6 +125,21 @@
   #winForceGraph { width: 460px; }
   #forceGraphCanvas { display: block; width: 100%; height: auto; background: #05060a; border-radius: 6px; margin-top: 6px; }
 
+  #winPeriodic { width: 260px; }
+  .periodic-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .periodic-tile {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    aspect-ratio: 1; border-radius: 6px; padding: 4px 2px;
+    border: 1px dashed rgba(255,255,255,0.15); color: #4a5170;
+  }
+  .periodic-tile.discovered {
+    border: 1px solid #6c85c9; background: rgba(108,133,201,0.15); color: #e8ecf5;
+  }
+  .periodic-num { font-size: 10px; align-self: flex-start; opacity: 0.75; }
+  .periodic-name { font-size: 12px; font-weight: 600; margin: 2px 0; text-align: center; line-height: 1.1; }
+  .periodic-count { font-size: 10px; color: #8b93ad; }
+  .periodic-tile.discovered .periodic-count { color: #a8b3d6; }
+
   .field-hint { color: #6c7690; font-size: 11px; margin: 2px 0 8px; line-height: 1.3; }
   .field-hint code { background: #12172a; border-radius: 3px; padding: 0 3px; }
 

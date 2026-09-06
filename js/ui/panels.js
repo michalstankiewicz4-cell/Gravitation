@@ -108,6 +108,45 @@
     orbitsList.innerHTML = html;
   }
 
+  // ---------- periodic table: every distinct nucleus size ever named, and how
+  // many times an atom of that size has appeared (see registerElementDiscovery
+  // in photon.js) — a separate, never-pruned registry from the Logs panel's
+  // per-instance atom rows above ----------
+  const periodicGrid = document.getElementById('periodicGrid');
+  let periodicPanelTimer = 0;
+  const PERIODIC_PANEL_REFRESH = 0.5; // seconds of real time between DOM rebuilds
+  const PERIODIC_MIN_SLOTS = 8; // always show at least this many tiles, discovered or not, so the table reads as a table from the start
+
+  function updatePeriodicTable(realDt) {
+    periodicPanelTimer += realDt;
+    if (periodicPanelTimer < PERIODIC_PANEL_REFRESH) return;
+    periodicPanelTimer = 0;
+
+    const rows = getElementRows();
+    const byIndex = new Map(rows.map(r => [r.size, r]));
+    const maxSize = rows.length ? Math.max(PERIODIC_MIN_SLOTS, rows[rows.length - 1].size) : PERIODIC_MIN_SLOTS;
+
+    let html = '';
+    for (let size = 2; size <= maxSize; size++) {
+      const r = byIndex.get(size);
+      if (r) {
+        html += `
+        <div class="periodic-tile discovered" title="${r.name} — first appeared at ${formatDuration(r.firstSeenAt)}">
+          <span class="periodic-num">${size}</span>
+          <span class="periodic-name">${r.name}</span>
+          <span class="periodic-count">×${r.count}</span>
+        </div>`;
+      } else {
+        html += `
+        <div class="periodic-tile" title="Not yet formed">
+          <span class="periodic-num">${size}</span>
+          <span class="periodic-name">?</span>
+        </div>`;
+      }
+    }
+    periodicGrid.innerHTML = html;
+  }
+
   // a visualized group keeps showing while it's still tracked at all (still in
   // orbitTracker for a pair, nucleusTracker for an atom's nucleus), not just
   // while past the display thresholds — so it survives the normal wobble in/out
@@ -618,6 +657,7 @@
     updateInfoPanelIfOpen();
     updateStats();
     updateOrbitsPanel(dt);
+    updatePeriodicTable(dt);
     updateZoomIndicator();
     renderForcePreview();
     renderForceGraph();
