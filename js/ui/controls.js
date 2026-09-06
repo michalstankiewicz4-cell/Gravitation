@@ -93,11 +93,21 @@
 
   // 3D mode's spawn always drops the new photon on the sphere's own z=0 (center)
   // plane — see mainUnprojectCenterPlane's comment for why that's the one plane a
-  // rotated view can still invert a click through unambiguously.
+  // rotated view can still invert a click through unambiguously. That inverse
+  // projection has no notion of the sphere's own radius, though — a click
+  // anywhere on screen (the canvas corners, or anywhere at all once the view is
+  // pitched, since dividing by cos(pitch) blows the mapped position up) maps to
+  // SOME (x, y), including ones well outside the sphere — so clamp the result
+  // back onto the disc before ever placing a photon there.
   function spawnPhotonAt3D(x, y) {
     if (photons.length >= MAX_PHOTONS) return;
+    const c = mainSphereCenter(), radius = mainSphereRadius();
+    const dx = x - c.x, dy = y - c.y;
+    const d = Math.hypot(dx, dy);
+    const maxD = radius * 0.98; // small margin so it doesn't spawn exactly on the boundary
+    if (d > maxD) { const k = maxD / d; x = c.x + dx * k; y = c.y + dy * k; }
     const p = makePhoton();
-    p.x = x; p.y = y; p.z = mainSphereCenter().z;
+    p.x = x; p.y = y; p.z = c.z;
     photons.push(p);
   }
 

@@ -128,6 +128,27 @@
   // of step()'s toroidal wrap. Uses a 3D spatial grid — brute force would be
   // O(n^2) at the main sim's photon counts, exactly the problem step()'s own 2D
   // grid already solves; this is that same idea with a third axis.
+  // grid buckets + per-photon cell coords are reused frame to frame instead of
+  // reallocated (see stepMain3D): rebuilding a fresh array-of-arrays plus one
+  // small [cx,cy,cz] array per photon every single frame was pure GC pressure
+  // for structures whose shape barely changes call to call. Buckets are
+  // cleared in place (length = 0, keeps the backing store); the coord arrays
+  // are flat typed arrays instead of an array of 3-element arrays, and only
+  // grow (never shrink) when a bigger photon count needs it.
+  let gridCells = null, gridCols = -1;
+  let gridCX = new Int32Array(0), gridCY = new Int32Array(0), gridCZ = new Int32Array(0);
+  function getMainGrid(cols, n) {
+    if (gridCols !== cols || !gridCells) {
+      gridCells = new Array(cols * cols * cols);
+      for (let i = 0; i < gridCells.length; i++) gridCells[i] = [];
+      gridCols = cols;
+    } else {
+      for (let i = 0; i < gridCells.length; i++) gridCells[i].length = 0;
+    }
+    if (gridCX.length < n) { gridCX = new Int32Array(n); gridCY = new Int32Array(n); gridCZ = new Int32Array(n); }
+    return gridCells;
+  }
+
   function stepMain3D(dt) {
     const n = photons.length;
     if (n === 0) return;
@@ -142,15 +163,13 @@
     const minX = center.x - radius - cell / 2;
     const minY = center.y - radius - cell / 2;
     const minZ = center.z - radius - cell / 2;
-    const cells = new Array(cols * cols * cols);
-    for (let i = 0; i < cells.length; i++) cells[i] = [];
-    const cellCoord = new Array(n);
+    const cells = getMainGrid(cols, n);
     for (let i = 0; i < n; i++) {
       const p = photons[i];
       const cx = Math.max(0, Math.min(cols - 1, Math.floor((p.x - minX) / cell)));
       const cy = Math.max(0, Math.min(cols - 1, Math.floor((p.y - minY) / cell)));
       const cz = Math.max(0, Math.min(cols - 1, Math.floor((p.z - minZ) / cell)));
-      cellCoord[i] = [cx, cy, cz];
+      gridCX[i] = cx; gridCY[i] = cy; gridCZ[i] = cz;
       cells[(cx * cols + cy) * cols + cz].push(i);
     }
 
@@ -162,7 +181,7 @@
 
     for (let i = 0; i < n; i++) {
       const a = photons[i];
-      const [cx, cy, cz] = cellCoord[i];
+      const cx = gridCX[i], cy = gridCY[i], cz = gridCZ[i];
       for (let ddx = -1; ddx <= 1; ddx++) {
         const nx = cx + ddx; if (nx < 0 || nx >= cols) continue;
         for (let ddy = -1; ddy <= 1; ddy++) {
@@ -176,17 +195,28 @@
               const b = photons[j];
 
               let dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
-              let d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+              const distSq = dx * dx + dy * dy + dz * dz;
+              const range = (a.forceRange + b.forceRange) / 2;
+              const collideDist = a.radius + b.radius;
+              // most grid-neighbor candidates end up farther than either
+              // threshold (the grid cell is sized for the single largest
+              // forceRange in the whole sim, so a lot of pairs it hands back
+              // are irrelevant to each other specifically) — comparing the
+              // squared distance skips the sqrt entirely for those, which is
+              // the majority case at high photon counts
+              const reach = range > collideDist ? range : collideDist;
+              if (distSq >= reach * reach) continue;
+
+              let d = Math.sqrt(distSq);
               if (d < 0.01) {
                 const dir = randomVelocity3D(0.1);
                 dx = dir.vx; dy = dir.vy; dz = dir.vz; d = 0.1;
               }
 
-              if (d < a.radius + b.radius) {
+              if (d < collideDist) {
                 newCollisionPairs.add(a.id < b.id ? (a.id + '_' + b.id) : (b.id + '_' + a.id));
               }
 
-              const range = (a.forceRange + b.forceRange) / 2;
               if (d >= range) continue;
 
               if (doOrbitTracking) updateOrbitTracking(a, b, d, seenOrbitPairs);
