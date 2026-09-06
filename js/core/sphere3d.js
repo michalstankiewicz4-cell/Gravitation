@@ -156,6 +156,9 @@
 
     const newCollisionPairs = new Set();
     const seenOrbitPairs = new Set();
+    orbitTrackingAccum += dt;
+    const doOrbitTracking = orbitTrackingAccum >= ORBIT_TRACKING_INTERVAL;
+    if (doOrbitTracking) orbitTrackingAccum = 0;
 
     for (let i = 0; i < n; i++) {
       const a = photons[i];
@@ -186,7 +189,7 @@
               const range = (a.forceRange + b.forceRange) / 2;
               if (d >= range) continue;
 
-              updateOrbitTracking(a, b, d, seenOrbitPairs);
+              if (doOrbitTracking) updateOrbitTracking(a, b, d, seenOrbitPairs);
 
               const ux = dx / d, uy = dy / d, uz = dz / d;
               const amp = (a.force + b.force) / 2;
@@ -209,10 +212,15 @@
       if (!activeCollisionPairs.has(key)) collisionCount++;
     }
     activeCollisionPairs = newCollisionPairs;
-    for (const [key, rec] of orbitTracker) {
-      if (!seenOrbitPairs.has(key)) { finalizeOrbitEnd(key, rec); orbitTracker.delete(key); }
+    // pruning/nucleus-tracking only make sense on the same frames the pairwise
+    // loop above actually fed seenOrbitPairs — otherwise every throttled-out
+    // frame would look like every pair vanished at once
+    if (doOrbitTracking) {
+      for (const [key, rec] of orbitTracker) {
+        if (!seenOrbitPairs.has(key)) { finalizeOrbitEnd(key, rec); orbitTracker.delete(key); }
+      }
+      updateClusterTracking(); // nucleus + orbital-shell "atom" tracking — see its own comment in photon.js
     }
-    updateClusterTracking(); // nucleus + orbital-shell "atom" tracking — see its own comment in photon.js
 
     // collected rather than removed in place — splicing mid-loop would desync the
     // indices step() and the pairwise loop above already relied on this frame

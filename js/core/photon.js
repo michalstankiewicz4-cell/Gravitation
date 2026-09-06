@@ -200,6 +200,14 @@
   const ORBIT_WINDOW = 3;           // seconds of continuous-interaction history required
   const ORBIT_VARIATION_MAX = 0.15; // max (maxD-minD)/avgD over that window to call it "stable"
   const ORBIT_HISTORY_MAX = 20;     // capped log of past (ended) orbits, one slot per pair
+  // Profiling at 3000 photons showed updateOrbitTracking() alone eating ~40% of
+  // the whole physics step (called once per in-range pair, every frame) even
+  // though what it's measuring only matters on a multi-second timescale
+  // (ORBIT_WINDOW=3s, NUCLEUS_MIN_DURATION=20s). Running it at a fixed sim-time
+  // cadence instead of every single frame (see stepMain3D) keeps well over 10x
+  // oversampling relative to that 3s window while cutting most of the cost.
+  let orbitTrackingAccum = 0;
+  const ORBIT_TRACKING_INTERVAL = 0.1; // sim seconds between orbit/nucleus tracking passes
   // "idA_idB" (idA<idB) -> { samples: [{t,d}], stableSince, stableMinD, stableMaxD }
   const orbitTracker = new Map();
   // one entry per pair, not one per end event — a pair that flickers in and out of
