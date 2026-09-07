@@ -87,6 +87,7 @@
           <span>:</span>
           <input type="text" class="var-expr" spellcheck="false">
           <button class="var-slider-toggle${row.slider ? ' active' : ''}" title="Toggle slider input">🎚</button>
+          ${isCustom ? '' : `<label class="var-halve" title="On split, a child gets half this value instead of copying the parent's as-is"><input type="checkbox" class="var-halve-check"> ½</label>`}
           ${isCustom ? '<button class="var-del" title="Delete helper variable">✕</button>' : ''}
         </div>
         <div class="var-slider-group" ${row.slider ? '' : 'hidden'}>
@@ -113,6 +114,15 @@
       const curVal = parseFloat(row.expr);
       rangeInput.value = isFinite(curVal) ? curVal : (row.min + row.max) / 2;
       exprInput.readOnly = row.slider; // title is set by revalidateAll() below
+
+      const halveCheck = el.querySelector('.var-halve-check');
+      if (halveCheck) {
+        halveCheck.checked = !!row.halveOnSplit;
+        halveCheck.addEventListener('change', () => {
+          row.halveOnSplit = halveCheck.checked;
+          saveSettings();
+        });
+      }
 
       nameInput.addEventListener('input', () => {
         row.name = nameInput.value;

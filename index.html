@@ -76,6 +76,8 @@
     <div class="row" data-stat-row="pos"><span class="k">Positive charge</span><span class="v" id="statPos">0</span></div>
     <div class="row" data-stat-row="neg"><span class="k">Negative charge</span><span class="v" id="statNeg">0</span></div>
     <div class="row" data-stat-row="collisions"><span class="k">Collisions</span><span class="v" id="statCollisions">0</span></div>
+    <div class="row" data-stat-row="splits"><span class="k">Splits</span><span class="v" id="statSplits">0</span></div>
+    <div class="row" data-stat-row="fusions"><span class="k">Fusions</span><span class="v" id="statFusions">0</span></div>
     <div class="row" data-stat-row="avgSpeed"><span class="k">Average speed</span><span class="v" id="statAvgSpeed">0</span></div>
   </div>
 </div>
@@ -94,6 +96,8 @@
     <label class="var-row"><input type="checkbox" class="stat-toggle" data-stat="pos" checked> Positive charge</label>
     <label class="var-row"><input type="checkbox" class="stat-toggle" data-stat="neg" checked> Negative charge</label>
     <label class="var-row"><input type="checkbox" class="stat-toggle" data-stat="collisions" checked> Collisions</label>
+    <label class="var-row"><input type="checkbox" class="stat-toggle" data-stat="splits" checked> Splits</label>
+    <label class="var-row"><input type="checkbox" class="stat-toggle" data-stat="fusions" checked> Fusions</label>
     <label class="var-row"><input type="checkbox" class="stat-toggle" data-stat="avgSpeed"> Average speed</label>
   </div>
 </div>
@@ -199,7 +203,7 @@
     </div>
   </div>
   <div class="window-body">
-    <div class="field-hint">The force between photons is sinusoidal — it alternately attracts and repels with distance, fading out at <code>forceRange</code>. <code>periods</code> is the number of full wave cycles within that range (can be fractional). Opposite and same charges are phase-shifted by half a period, so within the same "layer" one attracts while the other repels. <code>waveOffset</code> (0 to 1) shifts the wave upward: at 0 it's the classic wave (can briefly attract the same charge), at 1 the sign of the force never flips (the same charge always repels). <code>phaseShift</code> is the horizontal counterpart — it slides the wave sideways along distance, in units of one full period (0.5 = shift by half a period). You can add your own helper variables (button below) and edit formulas — available functions: <code>rand, abs, min, max, sqrt, pow, round, floor, ceil</code>. Use the arrows to change the calculation order.</div>
+    <div class="field-hint">The force between photons is sinusoidal — it alternately attracts and repels with distance, fading out at <code>forceRange</code>. <code>periods</code> is the number of full wave cycles within that range (can be fractional). Opposite and same charges are phase-shifted by half a period, so within the same "layer" one attracts while the other repels. <code>waveOffset</code> (0 to 1) shifts the wave upward: at 0 it's the classic wave (can briefly attract the same charge), at 1 the sign of the force never flips (the same charge always repels). <code>phaseShift</code> is the horizontal counterpart — it slides the wave sideways along distance, in units of one full period (0.5 = shift by half a period). <code>splitTime</code> is how many seconds a photon lives before splitting into two, flying off in opposite directions at 90° to its own flight direction. The <b>½</b> checkbox next to a property controls both directions of that split: on split, a child gets half the value (mass floors at 0.1) instead of copying the parent's as-is; on fusion — any two photons that collide always merge into one — that same property is summed from both parents instead of averaged, so a split-then-fusion round-trips back to the original value. You can add your own helper variables (button below) and edit formulas — available functions: <code>rand, abs, min, max, sqrt, pow, round, floor, ceil</code>. Use the arrows to change the calculation order.</div>
     <div id="editorRows"></div>
     <button class="add-var-btn" id="addVarBtn">+ Add helper variable</button>
     <input type="file" id="importVarsInput" accept=".csv,text/csv" style="display:none">

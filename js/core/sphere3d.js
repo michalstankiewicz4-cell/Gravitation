@@ -242,6 +242,29 @@
       if (!activeCollisionPairs.has(key)) collisionCount++;
     }
     activeCollisionPairs = newCollisionPairs;
+
+    // fusion: every colliding pair merges into one (see performFusion in
+    // photon.js) — collected here (read-only, `photons` untouched) rather than
+    // applied immediately, since the despawn/split loop right below still
+    // needs photons[i] to line up with the ax/ay/az arrays built above by
+    // index; mutating the array now would desync them. A photon already
+    // claimed by one fusion this frame is skipped in any other pair it's also
+    // touching (newCollisionPairs can list more than one pair per photon) —
+    // it simply fuses with whichever partner is processed first, and any
+    // others it was touching stay put for next frame.
+    const fusionConsumed = new Set();
+    const fusionParentIds = [];
+    const fusionChildren = [];
+    for (const key of newCollisionPairs) {
+      const [idA, idB] = key.split('_').map(Number);
+      if (fusionConsumed.has(idA) || fusionConsumed.has(idB)) continue;
+      const a = findPhoton(idA), b = findPhoton(idB);
+      if (!a || !b) continue;
+      fusionConsumed.add(idA); fusionConsumed.add(idB);
+      fusionParentIds.push(idA, idB);
+      fusionChildren.push(performFusion(a, b));
+    }
+
     // pruning/nucleus-tracking only make sense on the same frames the pairwise
     // loop above actually fed seenOrbitPairs — otherwise every throttled-out
     // frame would look like every pair vanished at once
@@ -255,6 +278,8 @@
     // collected rather than removed in place — splicing mid-loop would desync the
     // indices step() and the pairwise loop above already relied on this frame
     const despawned = [];
+    const toSplit = [];
+    let splitCapacity = MAX_PHOTONS - n; // each split is net +1 photon (1 parent -> 2 children)
     for (let i = 0; i < n; i++) {
       const p = photons[i];
       p.vx += (ax[i] / p.mass) * dt;
@@ -272,9 +297,22 @@
       }
 
       p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
-      if (applyBoundary(p, center, radius)) despawned.push(p.id);
+      if (applyBoundary(p, center, radius)) { despawned.push(p.id); continue; }
+
+      p.age += dt;
+      if (p.age >= p.splitTime && splitCapacity > 0 && !fusionConsumed.has(p.id)) { toSplit.push(p); splitCapacity--; }
     }
     if (despawned.length) removePhotonsByIds(despawned);
+    if (toSplit.length) {
+      removePhotonsByIds(toSplit.map(p => p.id));
+      for (const p of toSplit) photons.push(...performSplit(p));
+      splitCount += toSplit.length;
+    }
+    if (fusionParentIds.length) {
+      removePhotonsByIds(fusionParentIds);
+      photons.push(...fusionChildren);
+      fusionCount += fusionChildren.length;
+    }
   }
 
   // dense lat/long wireframe of the sphere itself — the visible "container" boundary

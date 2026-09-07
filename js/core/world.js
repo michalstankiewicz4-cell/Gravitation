@@ -56,7 +56,7 @@
   updateZoomIndicator();
 
   // ---------- persisted settings: photon editor variables + rules ----------
-  const LS_KEY = 'photonSim.settings.v10'; // v10: added the phaseShift role
+  const LS_KEY = 'photonSim.settings.v11'; // v11: added the splitTime role + per-row halveOnSplit flags
   // each row: { role, name, expr }. Rows with a "role" feed directly into the photon
   // (charge / mass / maxSpeed / energy / force / forceRange / periods) — exactly one
   // row per required role, and role never changes. Rows with role:null are helper/
@@ -70,10 +70,10 @@
   // periods * d / forceRange) * (1 - d/forceRange), sign-flipped for same-charge pairs.
   // That gives naturally repeating attract/repel "shells" out to forceRange, controlled
   // by how many wave "periods" fit in it — see step() for the exact formula.
-  const REQUIRED_ROLES = ['charge', 'mass', 'speed', 'energy', 'force', 'forceRange', 'periods', 'waveOffset', 'phaseShift'];
+  const REQUIRED_ROLES = ['charge', 'mass', 'speed', 'energy', 'force', 'forceRange', 'periods', 'waveOffset', 'phaseShift', 'splitTime'];
   const DEFAULT_VARS = [
     { role: 'charge', name: 'charge', expr: 'rand(-1, 1)' },
-    { role: 'mass',   name: 'mass',   expr: 'rand(0.5, 3)' },
+    { role: 'mass',   name: 'mass',   expr: 'rand(0.5, 3)', halveOnSplit: true },
     { role: 'speed',  name: 'speed',  expr: '100 / mass' },
     { role: 'energy', name: 'energy', expr: '9' },
     { role: 'force',  name: 'force',  expr: 'abs(charge) * 5000' },
@@ -87,9 +87,15 @@
     { role: 'waveOffset', name: 'waveOffset', expr: '1' },
     // horizontal counterpart to waveOffset: slides the wave sideways along distance,
     // in units of one full period (0.5 = shift by half a period, wraps every 1.0)
-    { role: 'phaseShift', name: 'phaseShift', expr: '0' }
+    { role: 'phaseShift', name: 'phaseShift', expr: '0' },
+    // seconds a photon lives before splitting into two — see performSplit() in
+    // photon.js. Every role row above can be marked "halve on split" (the
+    // checkbox next to it in the editor); a checked row's value is halved for
+    // both children (mass floors at 0.1 — see performSplit), an unchecked one
+    // is simply copied from the parent as-is.
+    { role: 'splitTime', name: 'splitTime', expr: '2' }
   ];
-  const ROLE_FALLBACK = { charge: 0, mass: 1, speed: 50, energy: 10, force: 1000, forceRange: 100, periods: 2, waveOffset: 0, phaseShift: 0 };
+  const ROLE_FALLBACK = { charge: 0, mass: 1, speed: 50, energy: 10, force: 1000, forceRange: 100, periods: 2, waveOffset: 0, phaseShift: 0, splitTime: 2 };
 
   function normalizeVariables(arr) {
     const ok = Array.isArray(arr) && arr.length >= REQUIRED_ROLES.length
@@ -102,7 +108,11 @@
       // instead of typed as a formula — expr still just holds the resulting literal
       slider: !!v.slider,
       min: typeof v.min === 'number' && isFinite(v.min) ? v.min : 0,
-      max: typeof v.max === 'number' && isFinite(v.max) ? v.max : 10
+      max: typeof v.max === 'number' && isFinite(v.max) ? v.max : 10,
+      // whether a fission child inherits half of this role's value instead of
+      // the parent's value unchanged — only meaningful on role rows (a helper
+      // variable isn't stored on the photon, so there's nothing to halve)
+      halveOnSplit: !!v.halveOnSplit
     }));
   }
   function loadSettings() {

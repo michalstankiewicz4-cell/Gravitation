@@ -5,6 +5,8 @@
   const statPos = document.getElementById('statPos');
   const statNeg = document.getElementById('statNeg');
   const statCollisions = document.getElementById('statCollisions');
+  const statSplits = document.getElementById('statSplits');
+  const statFusions = document.getElementById('statFusions');
   const statAvgSpeed = document.getElementById('statAvgSpeed');
 
   function updateStats() {
@@ -17,6 +19,8 @@
     statPos.textContent = pos;
     statNeg.textContent = neg;
     statCollisions.textContent = collisionCount;
+    statSplits.textContent = splitCount;
+    statFusions.textContent = fusionCount;
     statAvgSpeed.textContent = (photons.length ? speedSum / photons.length : 0).toFixed(1) + ' px/s';
   }
 
@@ -389,7 +393,7 @@
 
   // ---------- stats panel settings: which rows are shown, persisted ----------
   const STATS_LS_KEY = 'photonSim.statVisibility.v1';
-  const DEFAULT_STAT_VISIBILITY = { total: true, pos: true, neg: true, collisions: true, avgSpeed: false };
+  const DEFAULT_STAT_VISIBILITY = { total: true, pos: true, neg: true, collisions: true, splits: true, fusions: true, avgSpeed: false };
   function loadStatVisibility() {
     try {
       const raw = localStorage.getItem(STATS_LS_KEY);

@@ -168,6 +168,12 @@
     flex-shrink: 0; padding: 2px 4px; border-radius: 4px;
   }
   .var-slider-toggle:hover, .var-slider-toggle.active { color: #fff; background: rgba(108,133,201,0.25); }
+  .var-halve {
+    display: flex; align-items: center; gap: 2px; flex-shrink: 0;
+    color: #8b93ad; font-size: 11px; cursor: pointer; padding: 2px 3px; border-radius: 4px;
+  }
+  .var-halve:hover { color: #fff; background: rgba(108,133,201,0.15); }
+  .var-halve input { margin: 0; cursor: pointer; }
   .var-slider-group { display: flex; align-items: center; gap: 4px; margin-left: 20px; }
   .var-min, .var-max {
     background: #12172a; border: 1px solid rgba(255,255,255,0.15);

@@ -16,6 +16,7 @@
     const periods = clampNum(results.periods, -50, 50, 2);
     const waveOffset = clampNum(results.waveOffset, 0, 1, 0);
     const phaseShift = clampNum(results.phaseShift, -1000, 1000, 0);
+    const splitTime = clampNum(results.splitTime, 0.1, 1000, 2);
     const angle = rand(0, Math.PI * 2);
     const initSpeed = maxSpeed; // speed is always locked to the formula value — see step()
     return {
@@ -23,6 +24,7 @@
       x: rand(0, W), y: rand(0, H), z: 0,
       vx: Math.cos(angle) * initSpeed, vy: Math.sin(angle) * initSpeed, vz: 0,
       charge, mass, maxSpeed, energy, force, forceRange, periods, waveOffset, phaseShift,
+      splitTime, age: 0,
       radius: PHOTON_RADIUS
     };
   }
@@ -45,6 +47,7 @@
       p.periods = clampNum(results.periods, -50, 50, p.periods);
       p.waveOffset = clampNum(results.waveOffset, 0, 1, p.waveOffset);
       p.phaseShift = clampNum(results.phaseShift, -1000, 1000, p.phaseShift);
+      p.splitTime = clampNum(results.splitTime, 0.1, 1000, p.splitTime);
     }
   }
 
@@ -52,6 +55,112 @@
   function schedulePhotonRefresh() {
     if (refreshTimer) clearTimeout(refreshTimer);
     refreshTimer = setTimeout(refreshAllPhotons, 150);
+  }
+
+  // ---------- fission: a photon splits into two identical-ish children once
+  // its own age reaches its splitTime (see stepMain3D's per-photon loop, which
+  // ages every photon and calls performSplit once that threshold is crossed).
+  // Each role row in the editor carries its own "halve on split" checkbox
+  // (variables[i].halveOnSplit) — checked means a child gets half the parent's
+  // value for that property, unchecked means the child just copies the
+  // parent's current value as-is. ----------
+  function splitHalvesFor(role) {
+    const row = variables.find(v => v.role === role);
+    return !!(row && row.halveOnSplit);
+  }
+  function childRoleValue(role, parentValue) {
+    if (!splitHalvesFor(role)) return parentValue;
+    const halved = parentValue / 2;
+    return role === 'mass' ? Math.max(0.1, halved) : halved;
+  }
+
+  // splits `p` into two children flying off in opposite directions, both at a
+  // 90° angle to p's own current flight direction (a stationary photon has no
+  // direction to be perpendicular to, so it falls back to +x/-x arbitrarily).
+  function performSplit(p) {
+    const speed = Math.hypot(p.vx, p.vy, p.vz);
+    const dir = speed > 1e-6 ? { x: p.vx / speed, y: p.vy / speed, z: p.vz / speed } : { x: 1, y: 0, z: 0 };
+    // any axis not parallel to dir works as a cross-product partner to get a
+    // perpendicular vector — z unless dir is already close to the z axis, in
+    // which case x is used instead
+    const ref = Math.abs(dir.z) < 0.9 ? { x: 0, y: 0, z: 1 } : { x: 1, y: 0, z: 0 };
+    let px = dir.y * ref.z - dir.z * ref.y, py = dir.z * ref.x - dir.x * ref.z, pz = dir.x * ref.y - dir.y * ref.x;
+    const plen = Math.hypot(px, py, pz) || 1;
+    px /= plen; py /= plen; pz /= plen;
+
+    const childSpeed = childRoleValue('speed', p.maxSpeed);
+    // nudge the children apart along the same perpendicular axis they're
+    // launched on, clear of HARD_CORE_R — spawning them exactly on top of each
+    // other would let that hard-core repulsion (independent of either
+    // photon's own `force`) immediately shove them off-axis, undermining the
+    // "exactly 90° from the parent's heading" launch direction before it ever
+    // gets to matter
+    const SPLIT_OFFSET = HARD_CORE_R * 1.5;
+    function makeChild(sign) {
+      return {
+        id: nextId++,
+        x: p.x + px * sign * SPLIT_OFFSET, y: p.y + py * sign * SPLIT_OFFSET, z: p.z + pz * sign * SPLIT_OFFSET,
+        vx: px * sign * childSpeed, vy: py * sign * childSpeed, vz: pz * sign * childSpeed,
+        charge: childRoleValue('charge', p.charge),
+        mass: childRoleValue('mass', p.mass),
+        maxSpeed: childSpeed,
+        energy: childRoleValue('energy', p.energy),
+        force: childRoleValue('force', p.force),
+        forceRange: childRoleValue('forceRange', p.forceRange),
+        periods: childRoleValue('periods', p.periods),
+        waveOffset: childRoleValue('waveOffset', p.waveOffset),
+        phaseShift: childRoleValue('phaseShift', p.phaseShift),
+        splitTime: childRoleValue('splitTime', p.splitTime),
+        age: 0,
+        radius: p.radius
+      };
+    }
+    return [makeChild(1), makeChild(-1)];
+  }
+
+  // ---------- fusion: two colliding photons merge into one (see stepMain3D's
+  // collision detection) — the inverse of performSplit() above. A role marked
+  // "halve on split" is summed here instead, so a split-then-fuse round-trips
+  // back to the original value; an unmarked role is averaged, since merging
+  // two DIFFERENT photons has no single well-defined "keep it as-is" the way
+  // one photon becoming two identical-ish copies of itself does. ----------
+  // bounds mirrored from makePhoton()'s own clamps — split only ever shrinks a
+  // value that already started inside these, but fusion can grow one (mass,
+  // force, ...) past them through repeated merges without a ceiling here.
+  const FUSION_ROLE_BOUNDS = {
+    charge: [-10, 10], mass: [0.05, 1000], speed: [0, 5000], energy: [-1000, 1000],
+    force: [0, 1000000], forceRange: [5, 4000], periods: [-50, 50], waveOffset: [0, 1],
+    phaseShift: [-1000, 1000], splitTime: [0.1, 1000]
+  };
+  function fusionRoleValue(role, aVal, bVal) {
+    const combined = splitHalvesFor(role) ? aVal + bVal : (aVal + bVal) / 2;
+    const bounds = FUSION_ROLE_BOUNDS[role];
+    return bounds ? clampNum(combined, bounds[0], bounds[1], combined) : combined;
+  }
+
+  function performFusion(a, b) {
+    const totalMass = a.mass + b.mass;
+    const wa = totalMass > 0 ? a.mass / totalMass : 0.5, wb = 1 - wa;
+    return {
+      id: nextId++,
+      x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, z: (a.z + b.z) / 2,
+      // momentum-weighted so the heavier parent dominates the merged
+      // direction — whatever speed this nets out to gets rescaled to the
+      // merged photon's own maxSpeed on the very next physics step anyway
+      vx: a.vx * wa + b.vx * wb, vy: a.vy * wa + b.vy * wb, vz: a.vz * wa + b.vz * wb,
+      charge: fusionRoleValue('charge', a.charge, b.charge),
+      mass: fusionRoleValue('mass', a.mass, b.mass),
+      maxSpeed: fusionRoleValue('speed', a.maxSpeed, b.maxSpeed),
+      energy: fusionRoleValue('energy', a.energy, b.energy),
+      force: fusionRoleValue('force', a.force, b.force),
+      forceRange: fusionRoleValue('forceRange', a.forceRange, b.forceRange),
+      periods: fusionRoleValue('periods', a.periods, b.periods),
+      waveOffset: fusionRoleValue('waveOffset', a.waveOffset, b.waveOffset),
+      phaseShift: fusionRoleValue('phaseShift', a.phaseShift, b.phaseShift),
+      splitTime: fusionRoleValue('splitTime', a.splitTime, b.splitTime),
+      age: 0,
+      radius: PHOTON_RADIUS
+    };
   }
 
   // shared white<->blue/orange blend for a signed fraction t in [-1, 1] (0 = white)
@@ -187,6 +296,8 @@
 
   let collisionCount = 0;
   let activeCollisionPairs = new Set();
+  let splitCount = 0; // total performSplit() calls this session (see stepMain3D)
+  let fusionCount = 0; // total performFusion() calls this session (see stepMain3D)
 
   // ---------- orbit detection ----------
   // a pair counts as a "stable orbit" when their distance stays within
