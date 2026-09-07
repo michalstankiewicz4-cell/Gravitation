@@ -48,6 +48,67 @@
   }));
   updateHint();
 
+  // ---------- balanced spawn: N normal photons, the last one's sign nudges
+  // the batch toward a balanced charge ----------
+  // every photon (the last one included) draws its charge from the normal
+  // formula, same magnitude distribution as any other spawn — the last one
+  // only gets its SIGN chosen (whichever brings the batch's running total
+  // closer to zero) instead of literally cancelling the whole sum outright.
+  // A full cancellation sounds nice on paper but hands that one photon
+  // whatever extreme value undoes 49 others put together — if the formula
+  // happens to skew heavily one way over a given batch (e.g. it leans mostly
+  // negative with only the occasional positive), that "whatever it takes"
+  // value can dwarf every other photon's charge and clamp straight to the
+  // ±10 ceiling, which looks like a bug even though the arithmetic is right.
+  // Keeping its magnitude ordinary avoids that outlier while still pushing
+  // the +/- balance the right way — though with a strongly one-sided formula,
+  // one photon's sign can only help so much; the real fix there is the
+  // formula itself (see the earlier round(rand(-1,1)) / floor(rand(-1,2))
+  // discussion for actually-symmetric options).
+  const balancedSpawnCountInput = document.getElementById('balancedSpawnCount');
+  const balancedSpawnBtn = document.getElementById('balancedSpawnBtn');
+  function spawnBalancedBatch(count) {
+    count = Math.floor(count);
+    if (!isFinite(count) || count < 2) return; // need at least 2 for "the last one" to mean anything
+    count = Math.min(count, MAX_PHOTONS - photons.length);
+    if (count < 2) return; // no room
+
+    const center = mainSphereCenter(), radius = mainSphereRadius();
+    const maxR = radius * 0.98; // same margin spawnPhotonAt3D clamps a manual click to
+    const batch = [];
+    let chargeSum = 0;
+    for (let i = 0; i < count; i++) {
+      const isLast = i === count - 1;
+      let p;
+      if (isLast) {
+        const draft = makePhoton(); // a completely ordinary draw, same as everyone else in the batch
+        const flipped = -draft.charge;
+        const finalCharge = Math.abs(chargeSum + flipped) < Math.abs(chargeSum + draft.charge) ? flipped : draft.charge;
+        // rebuilt (not just reassigned) so anything derived from charge in the
+        // user's own formulas (force, forceRange, ...) stays consistent with
+        // whichever sign actually got picked
+        p = finalCharge === draft.charge ? draft : makePhoton({ charge: finalCharge });
+      } else {
+        p = makePhoton();
+        chargeSum += p.charge;
+      }
+      // a random point on the sphere's own z=0 plane, at whatever position and
+      // velocity makePhoton() itself already rolled — exactly what dropping a
+      // photon by hand with the "Spawn" brush does (see spawnPhotonAt3D), just
+      // done `count` times at once instead of once per click
+      const r = maxR * Math.sqrt(Math.random()); // sqrt: uniform over the disc's AREA, not its radius
+      const theta = Math.random() * Math.PI * 2;
+      p.x = center.x + r * Math.cos(theta);
+      p.y = center.y + r * Math.sin(theta);
+      p.z = center.z;
+      batch.push(p);
+    }
+    photons.push(...batch);
+  }
+  balancedSpawnBtn.addEventListener('click', () => {
+    spawnBalancedBatch(parseInt(balancedSpawnCountInput.value, 10));
+  });
+
   // ---------- color filter (winFilter): default fixed scale vs. intensity-by-charge ----------
   const colorModeButtons = document.querySelectorAll('#colorModeGroup .tool-btn');
   colorModeButtons.forEach(b => b.addEventListener('click', () => {

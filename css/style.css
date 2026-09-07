@@ -28,6 +28,11 @@
   #meshDensityRow { font-size: 13px; color: #b7c0d8; }
   #meshDensityRow input[type=range] { width: 110px; }
   #meshDensityVal { min-width: 34px; display: inline-block; }
+  #balancedSpawnRow { font-size: 13px; color: #b7c0d8; }
+  #balancedSpawnCount {
+    width: 56px; background: #12172a; border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 4px; color: #e8ecf5; padding: 3px 5px; font-size: 12px;
+  }
   #hint { margin-left: auto; font-size: 12px; color: #6c7690; }
   #clearDataBtn {
     background: #3a1c1c; color: #ffb4b4; border: 1px solid rgba(255,107,107,0.35);

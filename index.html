@@ -47,6 +47,12 @@
     <button class="tool-btn boundary-mode-btn active" data-mode="wrap" title="Photons that exit reappear on the opposite side of the sphere, same direction (default)">Wrap</button>
   </div>
 
+  <div class="toolgroup" id="balancedSpawnRow">
+    <label for="balancedSpawnCount">Balanced spawn</label>
+    <input type="number" id="balancedSpawnCount" min="2" max="3000" step="1" value="50">
+    <button class="tool-btn" id="balancedSpawnBtn" title="Spawns this many photons at random points inside the sphere. Every one but the last uses the normal charge formula; the last one's charge is set to whatever brings this batch's total charge to exactly zero.">Spawn</button>
+  </div>
+
   <div id="hint">Click a photon = details &nbsp;•&nbsp; drag a rectangle = photon list</div>
 
   <button id="clearDataBtn" title="Deletes saved editor settings and window size/position, restoring the defaults">Clear data</button>

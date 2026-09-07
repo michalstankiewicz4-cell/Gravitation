@@ -5,8 +5,15 @@
   const PHOTON_RADIUS = 1; // fixed 1px visual size
   const MAX_PHOTONS = 3000;
 
-  function makePhoton() {
-    const { results } = runCompiled(compiledVarsCache);
+  // `overrides` pins specific roles (e.g. { charge: -3 }) to an exact value
+  // instead of re-rolling their formula — everything else still derives from
+  // it normally (see runCompiled), so a pinned charge still produces a
+  // consistent force/forceRange instead of leaving them from whatever the
+  // formula would have rolled on its own. Used by the balanced-spawn button
+  // (see spawnBalancedBatch in controls.js) for the one photon whose charge is
+  // set after the fact to net the batch to zero.
+  function makePhoton(overrides) {
+    const { results } = runCompiled(compiledVarsCache, overrides);
     const charge = clampNum(results.charge, -10, 10, 0);
     const mass = clampNum(results.mass, 0.05, 1000, 1);
     const maxSpeed = clampNum(results.speed, 0, 5000, 0);
@@ -96,12 +103,18 @@
     // "exactly 90° from the parent's heading" launch direction before it ever
     // gets to matter
     const SPLIT_OFFSET = HARD_CORE_R * 1.5;
+    // a neutral photon splitting in two would otherwise always stay neutral
+    // (half of 0 is 0, and copying 0 as-is is still 0, regardless of the
+    // charge row's own ½ checkbox) — force it to pair-produce a -1 and a +1
+    // instead, still net zero, so charged photons can actually emerge from a
+    // neutral population. Anything already charged keeps the normal rule.
+    const pairProduces = p.charge === 0;
     function makeChild(sign) {
       return {
         id: nextId++,
         x: p.x + px * sign * SPLIT_OFFSET, y: p.y + py * sign * SPLIT_OFFSET, z: p.z + pz * sign * SPLIT_OFFSET,
         vx: px * sign * childSpeed, vy: py * sign * childSpeed, vz: pz * sign * childSpeed,
-        charge: childRoleValue('charge', p.charge),
+        charge: pairProduces ? sign : childRoleValue('charge', p.charge),
         mass: childRoleValue('mass', p.mass),
         maxSpeed: childSpeed,
         energy: childRoleValue('energy', p.energy),
